@@ -635,6 +635,7 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
         st.subheader("📊 Price Predictions Comparison")
         fig_comparison = go.Figure()
 
+        # Add forward predictions for each model
         for model_key, predictions in all_predictions.items():
             pred_df = predictions["pred_df"]
             config = predictions["config"]
@@ -644,8 +645,9 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                     x=pred_df.index,
                     y=pred_df["close"],
                     mode="lines+markers",
-                    name=config["name"],
+                    name=f"{config['name']} (Forward)",
                     line=dict(width=2),
+                    marker=dict(size=6),
                 )
             )
 
@@ -656,17 +658,57 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                 y=hist_df["close"],
                 mode="lines",
                 name="Historical",
-                line=dict(color="gray", dash="dash"),
+                line=dict(color="gray", dash="dash", width=2),
             )
         )
+
+        # Add backtest predictions and actual values if available
+        if st.session_state.get("backtest_run_all", False) and st.session_state.get(
+            "backtest_results_all"
+        ):
+            backtest_results_all = st.session_state.backtest_results_all
+
+            # Add backtest predictions for each model
+            for model_key, backtest_result in backtest_results_all.items():
+                config = backtest_result["config"]
+                backtest_pred_df = backtest_result["pred_df"]
+
+                fig_comparison.add_trace(
+                    go.Scatter(
+                        x=backtest_pred_df.index,
+                        y=backtest_pred_df["close"],
+                        mode="lines+markers",
+                        name=f"{config['name']} (Backtest Pred)",
+                        line=dict(width=2, dash="dot"),
+                        marker=dict(size=5),
+                        opacity=0.7,
+                    )
+                )
+
+            # Get the actual test data from the first available backtest result
+            # (all models should have same test dates since they're from same data)
+            first_result = next(iter(backtest_results_all.values()))
+            test_df = first_result["test_df"]
+
+            fig_comparison.add_trace(
+                go.Scatter(
+                    x=test_df.index,
+                    y=test_df["close"],
+                    mode="lines+markers",
+                    name="Actual (Backtest Period)",
+                    line=dict(color="#FF6B6B", width=3),
+                    marker=dict(size=8, symbol="diamond"),
+                )
+            )
 
         fig_comparison.update_layout(
             title="Price Predictions Comparison Across Models",
             xaxis_title="Date",
             yaxis_title="Price",
             template="plotly_dark",
-            height=500,
+            height=600,
             hovermode="x unified",
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
 
         st.plotly_chart(fig_comparison, use_container_width=True)
@@ -738,6 +780,7 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                 st.success(
                     f"✅ Backtests completed for {len(backtest_results_all)} model(s)!"
                 )
+                st.rerun()
 
     # Display backtest results
     if st.session_state.get("backtest_run_all", False) and st.session_state.get(
@@ -745,6 +788,59 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
     ):
         backtest_results_all = st.session_state.backtest_results_all
 
+        # ===========================
+        # CONSOLIDATED METRICS TABLE
+        # ===========================
+        st.subheader("📊 Backtest Metrics Comparison - All Models")
+
+        # Build consolidated metrics dataframe
+        metrics_comparison = []
+
+        for model_key, results in backtest_results_all.items():
+            config = results["config"]
+            metrics = results["metrics"]
+            pred_len = results["pred_len"]
+
+            # Extract metrics for close price (primary metric)
+            close_metrics = metrics.get("close", {})
+
+            metrics_comparison.append(
+                {
+                    "Model": config["name"],
+                    "Context Length": config["context_length"],
+                    "Parameters": config["params"],
+                    "MAE": f"{close_metrics.get('MAE', 0):.4f}",
+                    "RMSE": f"{close_metrics.get('RMSE', 0):.4f}",
+                    "MAPE (%)": f"{close_metrics.get('MAPE (%)', 0):.2f}%",
+                    "Data Points": close_metrics.get("Count", 0),
+                    "Test Period": f"{pred_len} days",
+                }
+            )
+
+        metrics_df = pd.DataFrame(metrics_comparison)
+
+        # Display the consolidated table with highlighting
+        st.dataframe(
+            metrics_df.style.highlight_min(
+                subset=["MAE", "RMSE", "MAPE (%)"], color="lightgreen", axis=0
+            ).highlight_max(
+                subset=["MAE", "RMSE", "MAPE (%)"], color="lightcoral", axis=0
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Add explanation
+        st.caption(
+            "🟢 **Green** = Best (lowest error) | 🔴 **Red** = Worst (highest error) | "
+            "Lower MAE, RMSE, and MAPE values indicate better prediction accuracy"
+        )
+
+        st.markdown("---")
+
+        # ===========================
+        # INDIVIDUAL MODEL TABS
+        # ===========================
         # Create tabs for backtest results
         backtest_tab_list = [
             backtest_results_all[k]["config"]["name"]
