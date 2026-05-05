@@ -286,19 +286,56 @@ def load_model(model_key="kronos-base"):
 # Initialize session state for models
 if "loaded_models" not in st.session_state:
     st.session_state.loaded_models = {}
+if "selected_models" not in st.session_state:
+    st.session_state.selected_models = ["kronos-base"]  # Default selection
 
+# Model selection using Streamlit pills (native chip component)
+st.sidebar.markdown("### 🎯 Select Models to Compare")
 
-# Load selected models
-selected_models = st.sidebar.multiselect(
-    "Select Models to Compare",
-    options=list(KRONOS_MODELS.keys()),
-    default=["kronos-base"],
-    format_func=lambda x: KRONOS_MODELS[x]["name"],
+# Create options list with model names and keys
+model_options = list(KRONOS_MODELS.keys())
+model_labels = [
+    f"{KRONOS_MODELS[k]['name']} ({KRONOS_MODELS[k]['params']})" for k in model_options
+]
+
+# Use st.pills for native chip selection (Streamlit 1.56+)
+# Set default to kronos-base label
+default_label = next(
+    (label for label in model_labels if "kronos-base" in label.lower()), model_labels[0]
 )
 
-if not selected_models:
-    st.warning("Please select at least one model from the sidebar.")
-    st.stop()
+selected_labels = st.sidebar.pills(
+    "Select models:",
+    options=model_labels,
+    default=[default_label],  # Always default to kronos-base
+    selection_mode="multi",
+    key="model_pill_selector",
+)
+
+# Convert selection back to model keys
+if selected_labels:
+    selected_models = []
+    for label in selected_labels:
+        # Extract model key from label (format: "Name (params)")
+        for k in model_options:
+            if f"{KRONOS_MODELS[k]['name']} ({KRONOS_MODELS[k]['params']})" == label:
+                selected_models.append(k)
+                break
+    st.session_state.selected_models = selected_models
+else:
+    st.session_state.selected_models = ["kronos-base"]
+    selected_models = ["kronos-base"]
+
+selected_models = st.session_state.selected_models
+
+# Display selected models summary in sidebar
+if selected_models:
+    st.sidebar.markdown("### 📊 Selected Models:")
+    for model_key in selected_models:
+        config = KRONOS_MODELS[model_key]
+        st.sidebar.caption(
+            f"✅ **{config['name']}** - Context: {config['context_length']} | {config['params']}"
+        )
 
 # Load models on demand
 for model_key in selected_models:
@@ -330,18 +367,6 @@ y_timestamp = pd.date_range(
 )
 
 y_timestamp = pd.Series(y_timestamp)
-
-# Display model information
-st.sidebar.markdown("### 📊 Selected Models Info:")
-for model_key in selected_models:
-    config = KRONOS_MODELS[model_key]
-    st.sidebar.info(
-        f"**{config['name']}**\n"
-        f"- Context Length: {config['context_length']}\n"
-        f"- Params: {config['params']}\n"
-        f"- {config['description']}"
-    )
-
 
 # -----------------------------
 # PREDICT
