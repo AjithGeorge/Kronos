@@ -5,12 +5,21 @@ import plotly.graph_objects as go
 import yfinance as yf
 import sys
 import os
+from datetime import datetime
 
 # Ensure local Kronos import works
 if os.getcwd() not in sys.path:
     sys.path.append(os.getcwd())
 
 from model import Kronos, KronosTokenizer, KronosPredictor
+from storage_manager import AnalysisStorageManager
+
+# =========================
+# INITIALIZE STORAGE MANAGER
+# =========================
+if "storage_manager" not in st.session_state:
+    st.session_state.storage_manager = AnalysisStorageManager()
+
 
 # =========================
 # MODEL CONFIGURATIONS
@@ -239,6 +248,18 @@ if "backtest_run_all" not in st.session_state:
     st.session_state.backtest_run_all = False
 if "backtest_results_all" not in st.session_state:
     st.session_state.backtest_results_all = {}
+if "load_from_storage" not in st.session_state:
+    st.session_state.load_from_storage = None
+if "loaded_from_storage" not in st.session_state:
+    st.session_state.loaded_from_storage = False
+if "storage_load_key" not in st.session_state:
+    st.session_state.storage_load_key = None
+if "auto_save_predictions" not in st.session_state:
+    st.session_state.auto_save_predictions = False
+if "auto_save_backtest" not in st.session_state:
+    st.session_state.auto_save_backtest = False
+if "refresh_analyses" not in st.session_state:
+    st.session_state.refresh_analyses = False
 
 # Button to load data
 if st.sidebar.button("Load Data", type="primary"):
@@ -253,6 +274,199 @@ if st.sidebar.button("Load Data", type="primary"):
             st.session_state.df = df
             st.session_state.data_loaded = True
             st.success("Data loaded successfully!")
+
+# ---- STORAGE SAVE CONTROLS (Persistent) ----
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Save Results")
+
+# Show save controls if predictions or backtest are ready to save
+if st.session_state.prediction_run and not st.session_state.loaded_from_storage:
+    st.sidebar.info("✅ Predictions ready to save")
+
+    col_psave1, col_psave2 = st.sidebar.columns(2)
+    with col_psave1:
+        if st.button(
+            "💾 Save Predictions", type="primary", key="sidebar_save_predictions"
+        ):
+            st.session_state.auto_save_predictions = True
+    with col_psave2:
+        if st.button("Skip", key="sidebar_skip_predictions"):
+            st.session_state.auto_save_predictions = False
+
+if st.session_state.backtest_run_all and st.session_state.storage_load_key:
+    st.sidebar.info("✅ Backtest ready to save")
+
+    col_bsave1, col_bsave2 = st.sidebar.columns(2)
+    with col_bsave1:
+        if st.button("💾 Save Backtest", type="primary", key="sidebar_save_backtest"):
+            st.session_state.auto_save_backtest = True
+    with col_bsave2:
+        if st.button("Skip", key="sidebar_skip_backtest"):
+            st.session_state.auto_save_backtest = False
+
+# ---- STORED ANALYSES SECTION ----
+st.sidebar.markdown("---")
+st.sidebar.subheader("📦 Stored Analyses")
+
+# Add sync/refresh button
+col_refresh, col_placeholder = st.sidebar.columns([1, 3])
+with col_refresh:
+    if st.button(
+        "🔄 Sync", key="refresh_stored_analyses", help="Refresh stored analyses list"
+    ):
+        st.session_state.refresh_analyses = True
+
+storage_manager = st.session_state.storage_manager
+stored_analyses = storage_manager.list_analyses()
+
+if stored_analyses:
+    # Show storage info
+    storage_info = storage_manager.get_storage_size()
+    st.sidebar.caption(
+        f"💾 {storage_info['num_analyses']} analyses | "
+        f"{storage_info['total_size_mb']:.1f} MB"
+    )
+
+    # Filter options
+    col_filter1, col_filter2 = st.sidebar.columns(2)
+    with col_filter1:
+        filter_symbol = st.text_input(
+            "Filter by symbol", value="", key="stored_filter_symbol"
+        )
+    with col_filter2:
+        filter_period = st.selectbox(
+            "Filter by period",
+            ["All"] + sorted(set(a.get("period") for a in stored_analyses)),
+            key="stored_filter_period",
+        )
+
+    # Apply filters
+    filtered_analyses = stored_analyses
+    if filter_symbol:
+        filtered_analyses = [
+            a
+            for a in filtered_analyses
+            if filter_symbol.upper() in a.get("symbol", "").upper()
+        ]
+    if filter_period != "All":
+        filtered_analyses = [
+            a for a in filtered_analyses if a.get("period") == filter_period
+        ]
+
+    if filtered_analyses:
+        selected_analysis_idx = st.sidebar.selectbox(
+            "Select analysis to load:",
+            range(len(filtered_analyses)),
+            format_func=lambda i: (
+                f"{filtered_analyses[i]['symbol']} | {filtered_analyses[i]['period']} | "
+                f"{filtered_analyses[i]['interval']} | "
+                f"{filtered_analyses[i].get('num_models', 1)} models | "
+                f"🧪 BT"
+                if filtered_analyses[i]["has_backtest"]
+                else ""
+            ),
+            key="stored_analysis_select",
+        )
+
+        selected_analysis = filtered_analyses[selected_analysis_idx]
+        selected_key = selected_analysis["key"]
+
+        col_load, col_delete = st.sidebar.columns(2)
+
+        with col_load:
+            if st.button(
+                "⚡ Load",
+                key=f"load_{selected_key}",
+                help="Load this analysis from storage",
+            ):
+                st.session_state.load_from_storage = selected_key
+                st.rerun()
+
+        with col_delete:
+            if st.button(
+                "🗑️",
+                key=f"delete_{selected_key}",
+                help="Delete this analysis",
+            ):
+                if storage_manager.delete_analysis(selected_key):
+                    st.sidebar.success("Deleted!")
+                    st.rerun()
+                else:
+                    st.sidebar.error("Failed to delete")
+
+        # Show selected analysis metadata
+        with st.sidebar.expander("📋 Analysis Details", expanded=False):
+            st.caption(f"**Created**: {selected_analysis.get('created_at', 'N/A')}")
+            st.caption(
+                f"**Models**: {', '.join(selected_analysis.get('model_names', []))}"
+            )
+            if selected_analysis.get("has_backtest"):
+                st.caption("**Includes**: Predictions + Backtest")
+            else:
+                st.caption("**Includes**: Predictions only")
+    else:
+        st.sidebar.info("No analyses match filters")
+else:
+    st.sidebar.info("📝 No stored analyses yet. Run predictions to save results.")
+
+
+# ---- HANDLE LOADING FROM STORAGE ----
+if st.session_state.load_from_storage:
+    load_key = st.session_state.load_from_storage
+    storage_manager = st.session_state.storage_manager
+    metadata = storage_manager.get_analysis_metadata(load_key)
+
+    if metadata:
+        # Load analysis data from storage
+        (
+            predictions,
+            pred_config,
+            backtest_results,
+            backtest_config,
+        ) = storage_manager.load_analysis(load_key)
+
+        if predictions:
+            # Set up session state from loaded data
+            st.session_state.all_predictions = predictions
+            st.session_state.prediction_run = True
+            st.session_state.loaded_from_storage = True
+            st.session_state.storage_load_key = load_key
+
+            # Load historical data for display
+            with st.spinner(f"Loading data for {metadata['symbol']}..."):
+                df = load_data(
+                    metadata["symbol"], metadata["period"], metadata["interval"]
+                )
+                if not df.empty:
+                    df["datetime"] = pd.to_datetime(df["datetime"])
+                    df = df.sort_values("datetime").reset_index(drop=True)
+                    st.session_state.df = df
+                    st.session_state.data_loaded = True
+
+                    # Extract y_timestamp from predictions
+                    if predictions:
+                        first_pred = next(iter(predictions.values()))
+                        if "pred_df" in first_pred:
+                            st.session_state.y_timestamp = first_pred["pred_df"].index
+                        st.session_state.hist_df = (
+                            df.tail(150).copy().set_index("datetime")
+                        )
+
+                    # Load backtest if available
+                    if backtest_results:
+                        st.session_state.backtest_run_all = True
+                        st.session_state.backtest_results_all = backtest_results
+
+                    st.success(
+                        f"✅ Loaded from storage: {metadata['symbol']} ({metadata['period']})"
+                    )
+                    st.info(
+                        "💡 This is cached data. Click 'Generate New Analysis' to regenerate."
+                    )
+
+                    # Reset flag
+                    st.session_state.load_from_storage = None
+                    st.rerun()
 
 # Check if data is loaded
 if not st.session_state.data_loaded:
@@ -368,10 +582,49 @@ y_timestamp = pd.date_range(
 
 y_timestamp = pd.Series(y_timestamp)
 
-# -----------------------------
-# PREDICT
-# -----------------------------
-if st.button("🔮 Run Predictions with All Selected Models"):
+# ---- CHECK FOR CACHED DATA ----
+st.markdown("---")
+st.subheader("🔮 Prediction Analysis")
+
+storage_manager = st.session_state.storage_manager
+
+# Build prediction config hash
+pred_config = {
+    "symbol": symbol,
+    "period": period,
+    "interval": interval,
+    "models": selected_models,
+    "pred_len": pred_len,
+    "lookback_limit": lookback_limit,
+}
+
+# Check if this exact analysis exists in cache
+existing_key = storage_manager.check_exists(symbol, period, interval, pred_config)
+
+if existing_key and st.session_state.loaded_from_storage:
+    col_cache1, col_cache2 = st.columns([2, 1])
+    with col_cache1:
+        st.info("🟢 **Viewing cached analysis** - Data was previously generated")
+    with col_cache2:
+        if st.button("🔄 Generate New", help="Regenerate analysis with current config"):
+            st.session_state.loaded_from_storage = False
+            st.session_state.load_from_storage = None
+            st.session_state.prediction_run = False
+            st.session_state.all_predictions = {}
+            st.session_state.backtest_run_all = False
+            st.session_state.backtest_results_all = {}
+            st.rerun()
+else:
+    # Show option to load if exists but not currently loaded
+    similar_analyses = storage_manager.get_duplicate_analyses(symbol, period, interval)
+    if similar_analyses and not st.session_state.prediction_run:
+        st.warning(
+            f"⚠️ Found {len(similar_analyses)} existing analysis/analyses for this symbol/period/interval combination. "
+            "You can load them from the '📦 Stored Analyses' section in the sidebar."
+        )
+
+# ---- PREDICTION BUTTON ----
+if st.button("🔮 Run Predictions with All Selected Models", type="primary"):
     with st.spinner("Running Kronos predictions..."):
         all_predictions = {}
 
@@ -415,9 +668,95 @@ if st.button("🔮 Run Predictions with All Selected Models"):
             st.session_state.y_timestamp = y_timestamp
             st.session_state.hist_df = df.tail(150).copy().set_index("datetime")
             st.session_state.prediction_run = True
+            st.session_state.loaded_from_storage = False
             st.success(f"✅ Predictions complete for {len(all_predictions)} model(s)!")
+            st.info(
+                "💡 Use 'Save Results' panel in sidebar to save predictions to storage"
+            )
         else:
             st.error("No successful predictions. Please check the errors above.")
+
+# ---- HANDLE AUTO-SAVE AFTER PREDICTIONS ----
+if st.session_state.get("auto_save_predictions", False):
+    storage_manager = st.session_state.storage_manager
+    try:
+        # Build prediction config
+        pred_config_to_save = {
+            "symbol": symbol,
+            "period": period,
+            "interval": interval,
+            "models": selected_models,
+            "pred_len": pred_len,
+            "lookback_limit": lookback_limit,
+        }
+
+        # Save predictions to storage
+        save_key = storage_manager.save_analysis(
+            symbol=symbol,
+            period=period,
+            interval=interval,
+            pred_config=pred_config_to_save,
+            predictions=st.session_state.all_predictions,
+        )
+
+        st.success(f"✅ Saved to storage! Key: {save_key[:20]}...")
+        st.session_state.auto_save_predictions = False
+        st.session_state.storage_load_key = save_key
+    except Exception as e:
+        st.error(f"Failed to save: {str(e)}")
+
+# ---- HANDLE AUTO-SAVE BACKTEST ----
+if st.session_state.get("auto_save_backtest", False) and st.session_state.get(
+    "storage_load_key"
+):
+    storage_manager = st.session_state.storage_manager
+    try:
+        # Build backtest config
+        backtest_config_to_save = {
+            "symbol": symbol,
+            "period": period,
+            "interval": interval,
+            "models": selected_models,
+            "backtest_pred_len": st.session_state.backtest_results_all.get(
+                list(st.session_state.backtest_results_all.keys())[0], {}
+            ).get("pred_len", 30),
+            "backtest_lookback": 256,
+        }
+
+        # Get existing analysis key or create new one
+        save_key = st.session_state.storage_load_key
+
+        # Remove old backtest file if exists and update with new backtest
+        analysis_dir = storage_manager.storage_root / save_key
+        backtest_file = analysis_dir / "backtest.pkl"
+
+        import pickle
+
+        # Save backtest data
+        bt_data = {
+            "backtest_results": st.session_state.backtest_results_all,
+            "config": backtest_config_to_save,
+        }
+
+        with open(backtest_file, "wb") as f:
+            pickle.dump(bt_data, f)
+
+        # Update metadata
+        import json
+
+        metadata_file = analysis_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+            metadata["has_backtest"] = True
+            metadata["backtest_config"] = backtest_config_to_save
+            with open(metadata_file, "w") as f:
+                json.dump(metadata, f, indent=2, default=str)
+
+        st.success(f"✅ Backtest saved to storage!")
+        st.session_state.auto_save_backtest = False
+    except Exception as e:
+        st.error(f"Failed to save backtest: {str(e)}")
 
 # Display prediction results if prediction has been run
 if st.session_state.prediction_run and "all_predictions" in st.session_state:
@@ -906,6 +1245,9 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                 st.session_state.backtest_results_all = backtest_results_all
                 st.success(
                     f"✅ Backtests completed for {len(backtest_results_all)} model(s)!"
+                )
+                st.info(
+                    "💡 Use 'Save Results' panel in sidebar to save backtest to storage"
                 )
                 st.rerun()
 
