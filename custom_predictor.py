@@ -834,9 +834,9 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                     "Model": config["name"],
                     "Context Length": config["context_length"],
                     "Parameters": config["params"],
-                    "MAE": f"{close_metrics.get('MAE', 0):.4f}",
-                    "RMSE": f"{close_metrics.get('RMSE', 0):.4f}",
-                    "MAPE (%)": f"{close_metrics.get('MAPE (%)', 0):.2f}%",
+                    "MAE": close_metrics.get("MAE", 0),
+                    "RMSE": close_metrics.get("RMSE", 0),
+                    "MAPE (%)": close_metrics.get("MAPE (%)", 0),
                     "Data Points": close_metrics.get("Count", 0),
                     "Test Period": f"{pred_len} days",
                 }
@@ -844,20 +844,57 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
 
         metrics_df = pd.DataFrame(metrics_comparison)
 
-        # Display the consolidated table with highlighting
+        # Display the consolidated table with highlighting and proper contrast
+        def style_metrics_table(df):
+            """Apply styling with proper text contrast for dark theme"""
+            # Create a copy to avoid modifying original
+            styled = df.style
+
+            # Define color schemes with good contrast
+            # Green background with dark text for best (min) values
+            # Red background with white text for worst (max) values
+            for col in ["MAE", "RMSE", "MAPE (%)"]:
+                if col in df.columns:
+                    # Apply styling for min values (best - green background, dark text)
+                    styled = styled.map(
+                        lambda x: (
+                            "background-color: #90EE90; color: #000000; font-weight: bold"
+                            if x == df[col].min()
+                            else ""
+                        ),
+                        subset=[col],
+                    )
+
+                    # Apply styling for max values (worst - red background, white text)
+                    styled = styled.map(
+                        lambda x: (
+                            "background-color: #FF6B6B; color: #FFFFFF; font-weight: bold"
+                            if x == df[col].max()
+                            else ""
+                        ),
+                        subset=[col],
+                    )
+
+            # Format the numeric columns for display
+            styled = styled.format(
+                {
+                    "MAE": "{:.4f}",
+                    "RMSE": "{:.4f}",
+                    "MAPE (%)": "{:.2f}%",
+                }
+            )
+
+            return styled
+
         st.dataframe(
-            metrics_df.style.highlight_min(
-                subset=["MAE", "RMSE", "MAPE (%)"], color="lightgreen", axis=0
-            ).highlight_max(
-                subset=["MAE", "RMSE", "MAPE (%)"], color="lightcoral", axis=0
-            ),
+            style_metrics_table(metrics_df),
             use_container_width=True,
             hide_index=True,
         )
 
         # Add explanation
         st.caption(
-            "🟢 **Green** = Best (lowest error) | 🔴 **Red** = Worst (highest error) | "
+            "🟢 **Light Green (black text)** = Best (lowest error) | 🔴 **Red (white text)** = Worst (highest error) | "
             "Lower MAE, RMSE, and MAPE values indicate better prediction accuracy"
         )
 
