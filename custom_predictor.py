@@ -738,6 +738,108 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
 
         st.plotly_chart(fig_comparison, use_container_width=True)
 
+        st.subheader("📈 Price Predictions Comparison (Candlestick)")
+        fig_comparison_candle = go.Figure()
+
+        fig_comparison_candle.add_trace(
+            go.Candlestick(
+                x=hist_df.index,
+                open=hist_df["open"],
+                high=hist_df["high"],
+                low=hist_df["low"],
+                close=hist_df["close"],
+                name="Historical",
+                increasing_line_color="green",
+                decreasing_line_color="red",
+                opacity=0.8,
+            )
+        )
+
+        candle_colors = [
+            ("blue", "orange"),
+            ("cyan", "magenta"),
+            ("yellow", "purple"),
+            ("lime", "deeppink"),
+        ]
+        comparison_required_cols = ["open", "high", "low", "close"]
+
+        for idx, (model_key, predictions) in enumerate(all_predictions.items()):
+            pred_df = predictions["pred_df"]
+            config = predictions["config"]
+
+            for col in comparison_required_cols:
+                if col not in pred_df.columns:
+                    pred_df[col] = pred_df["close"]
+
+            inc_color, dec_color = candle_colors[idx % len(candle_colors)]
+            fig_comparison_candle.add_trace(
+                go.Candlestick(
+                    x=pred_df.index,
+                    open=pred_df["open"],
+                    high=pred_df["high"],
+                    low=pred_df["low"],
+                    close=pred_df["close"],
+                    name=f"{config['name']} Prediction",
+                    increasing_line_color=inc_color,
+                    decreasing_line_color=dec_color,
+                    opacity=0.6,
+                )
+            )
+
+        if st.session_state.get("backtest_run_all", False) and st.session_state.get(
+            "backtest_results_all"
+        ):
+            backtest_results_all = st.session_state.backtest_results_all
+
+            for model_key, backtest_result in backtest_results_all.items():
+                config = backtest_result["config"]
+                backtest_pred_df = backtest_result["pred_df"]
+
+                for col in comparison_required_cols:
+                    if col not in backtest_pred_df.columns:
+                        backtest_pred_df[col] = backtest_pred_df["close"]
+
+                fig_comparison_candle.add_trace(
+                    go.Candlestick(
+                        x=backtest_pred_df.index,
+                        open=backtest_pred_df["open"],
+                        high=backtest_pred_df["high"],
+                        low=backtest_pred_df["low"],
+                        close=backtest_pred_df["close"],
+                        name=f"{config['name']} (Backtest Pred)",
+                        increasing_line_color="royalblue",
+                        decreasing_line_color="darkorange",
+                        opacity=0.5,
+                    )
+                )
+
+            first_result = next(iter(backtest_results_all.values()))
+            test_df = first_result["test_df"]
+
+            fig_comparison_candle.add_trace(
+                go.Scatter(
+                    x=test_df.index,
+                    y=test_df["close"],
+                    mode="lines+markers",
+                    name="Actual (Backtest Period)",
+                    line=dict(color="#FF6B6B", width=3),
+                    marker=dict(size=6, symbol="diamond"),
+                    opacity=0.8,
+                )
+            )
+
+        fig_comparison_candle.update_layout(
+            title="Price Predictions Comparison Across Models (Candlestick)",
+            xaxis_title="Date",
+            yaxis_title="Price",
+            template="plotly_dark",
+            height=700,
+            xaxis_rangeslider_visible=True,
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        )
+
+        st.plotly_chart(fig_comparison_candle, use_container_width=True)
+
     # ---- BACKTESTING SECTION ----
     st.markdown("---")
     st.subheader("🔍 Backtest Accuracy Check")
