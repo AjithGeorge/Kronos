@@ -354,17 +354,18 @@ if stored_analyses:
         ]
 
     if filtered_analyses:
+
+        def format_analysis_name(idx):
+            analysis = filtered_analyses[idx]
+            text = f"{analysis['symbol']} | {analysis['period']} | {analysis['interval']} | {analysis.get('num_models', 1)} models"
+            if analysis.get("has_backtest", False):
+                text += " | 🧪 BT"
+            return text
+
         selected_analysis_idx = st.sidebar.selectbox(
             "Select analysis to load:",
             range(len(filtered_analyses)),
-            format_func=lambda i: (
-                f"{filtered_analyses[i]['symbol']} | {filtered_analyses[i]['period']} | "
-                f"{filtered_analyses[i]['interval']} | "
-                f"{filtered_analyses[i].get('num_models', 1)} models | "
-                f"🧪 BT"
-                if filtered_analyses[i]["has_backtest"]
-                else ""
-            ),
+            format_func=format_analysis_name,
             key="stored_analysis_select",
         )
 
@@ -673,6 +674,7 @@ if st.button("🔮 Run Predictions with All Selected Models", type="primary"):
             st.info(
                 "💡 Use 'Save Results' panel in sidebar to save predictions to storage"
             )
+            st.rerun()
         else:
             st.error("No successful predictions. Please check the errors above.")
 
@@ -701,7 +703,9 @@ if st.session_state.get("auto_save_predictions", False):
 
         st.success(f"✅ Saved to storage! Key: {save_key[:20]}...")
         st.session_state.auto_save_predictions = False
+        st.session_state.prediction_run = False
         st.session_state.storage_load_key = save_key
+        st.rerun()
     except Exception as e:
         st.error(f"Failed to save: {str(e)}")
 
@@ -755,6 +759,8 @@ if st.session_state.get("auto_save_backtest", False) and st.session_state.get(
 
         st.success(f"✅ Backtest saved to storage!")
         st.session_state.auto_save_backtest = False
+        st.session_state.backtest_run_all = False
+        st.rerun()
     except Exception as e:
         st.error(f"Failed to save backtest: {str(e)}")
 
