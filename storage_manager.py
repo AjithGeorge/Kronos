@@ -43,6 +43,10 @@ class AnalysisStorageManager:
         except Exception as e:
             print(f"Warning: Could not save index: {e}")
 
+    def refresh_index(self) -> None:
+        """Reload the analyses index from disk."""
+        self._load_index()
+
     def _generate_config_hash(self, config_dict: Dict) -> str:
         """Generate a hash of configuration parameters."""
         config_str = json.dumps(config_dict, sort_keys=True, default=str)
