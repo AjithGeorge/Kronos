@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import yfinance as yf
 import sys
 import os
+import json
+import pickle
 from datetime import datetime
 
 # Ensure local Kronos import works
@@ -14,11 +16,53 @@ if os.getcwd() not in sys.path:
 from model import Kronos, KronosTokenizer, KronosPredictor
 from storage_manager import AnalysisStorageManager
 
-# =========================
-# INITIALIZE STORAGE MANAGER
-# =========================
-if "storage_manager" not in st.session_state:
-    st.session_state.storage_manager = AnalysisStorageManager()
+# -----------------------------
+# SESSION STATE INITIALIZATION
+# -----------------------------
+
+def init_session_state():
+    """Initialize all session state variables with default values."""
+    if "initialized" not in st.session_state:
+        st.session_state.initialized = True
+        st.session_state.storage_manager = AnalysisStorageManager()
+        st.session_state.df = None
+        st.session_state.data_loaded = False
+        st.session_state.prediction_run = False
+        st.session_state.pred_df = None
+        st.session_state.all_predictions = {}
+        st.session_state.hist_df = None
+        st.session_state.y_timestamp = None
+        st.session_state.backtest_run_all = False
+        st.session_state.backtest_results_all = {}
+        st.session_state.load_from_storage = None
+        st.session_state.loaded_from_storage = False
+        st.session_state.storage_load_key = None
+        st.session_state.auto_save_predictions = False
+        st.session_state.auto_save_backtest = False
+        st.session_state.refresh_analyses = False
+        st.session_state.loaded_models = {}
+        st.session_state.selected_models = ["kronos-base"]
+
+def reset_analysis_state():
+    """Clear previous analysis results when new data is loaded or new analysis starts."""
+    st.session_state.all_predictions = {}
+    st.session_state.prediction_run = False
+    st.session_state.pred_df = None
+    st.session_state.hist_df = None
+    st.session_state.y_timestamp = None
+    st.session_state.backtest_run_all = False
+    st.session_state.backtest_results_all = {}
+    st.session_state.loaded_from_storage = False
+    st.session_state.storage_load_key = None
+    st.session_state.load_from_storage = None
+    st.session_state.auto_save_predictions = False
+    st.session_state.auto_save_backtest = False
+    # Clear loaded storage defaults
+    for key in ["loaded_symbol", "loaded_period", "loaded_interval", "loaded_pred_len", "loaded_lookback"]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+init_session_state()
 
 
 # =========================
@@ -259,50 +303,8 @@ def load_data(symbol, period, interval):
 
 
 # -----------------------------
-# DATA LOADING (DEFERRED)
+# DATA LOADING
 # -----------------------------
-
-# Initialize session state for data
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "data_loaded" not in st.session_state:
-    st.session_state.data_loaded = False
-if "prediction_run" not in st.session_state:
-    st.session_state.prediction_run = False
-if "pred_df" not in st.session_state:
-    st.session_state.pred_df = None
-if "all_predictions" not in st.session_state:
-    st.session_state.all_predictions = {}
-if "hist_df" not in st.session_state:
-    st.session_state.hist_df = None
-if "y_timestamp" not in st.session_state:
-    st.session_state.y_timestamp = None
-if "backtest_run" not in st.session_state:
-    st.session_state.backtest_run = False
-if "backtest_results" not in st.session_state:
-    st.session_state.backtest_results = None
-if "backtest_run_all" not in st.session_state:
-    st.session_state.backtest_run_all = False
-if "backtest_results_all" not in st.session_state:
-    st.session_state.backtest_results_all = {}
-if "load_from_storage" not in st.session_state:
-    st.session_state.load_from_storage = None
-if "loaded_from_storage" not in st.session_state:
-    st.session_state.loaded_from_storage = False
-if "storage_load_key" not in st.session_state:
-    st.session_state.storage_load_key = None
-if "auto_save_predictions" not in st.session_state:
-    st.session_state.auto_save_predictions = False
-if "auto_save_backtest" not in st.session_state:
-    st.session_state.auto_save_backtest = False
-if "refresh_analyses" not in st.session_state:
-    st.session_state.refresh_analyses = False
-
-# Initialize model-related session state
-if "loaded_models" not in st.session_state:
-    st.session_state.loaded_models = {}
-if "selected_models" not in st.session_state:
-    st.session_state.selected_models = ["kronos-base"]  # Default selection
 
 # Button to load data
 if st.sidebar.button("Load Data", type="primary"):
@@ -318,34 +320,9 @@ if st.sidebar.button("Load Data", type="primary"):
             st.session_state.data_loaded = True
 
             # Clear previous analysis state when new data is loaded
-            st.session_state.all_predictions = {}
-            st.session_state.prediction_run = False
-            st.session_state.pred_df = None
-            st.session_state.hist_df = None
-            st.session_state.y_timestamp = None
-            st.session_state.backtest_run = False
-            st.session_state.backtest_results = None
-            st.session_state.backtest_run_all = False
-            st.session_state.backtest_results_all = {}
-            st.session_state.loaded_from_storage = False
-            st.session_state.storage_load_key = None
-            st.session_state.load_from_storage = None
-            st.session_state.auto_save_predictions = False
-            st.session_state.auto_save_backtest = False
-
-            # Clear loaded storage defaults so sidebar inputs reset to defaults
-            if "loaded_symbol" in st.session_state:
-                del st.session_state.loaded_symbol
-            if "loaded_period" in st.session_state:
-                del st.session_state.loaded_period
-            if "loaded_interval" in st.session_state:
-                del st.session_state.loaded_interval
-            if "loaded_pred_len" in st.session_state:
-                del st.session_state.loaded_pred_len
-            if "loaded_lookback" in st.session_state:
-                del st.session_state.loaded_lookback
-
+            reset_analysis_state()
             st.success("Data loaded successfully!")
+            st.rerun()
 
 # ---- MODEL SELECTION (In Sidebar, before Save section) ----
 st.sidebar.markdown("---")
@@ -408,30 +385,23 @@ available_predictors = st.session_state.loaded_models
 # ---- STORAGE SAVE CONTROLS (Persistent) ----
 st.sidebar.markdown("---")
 with st.sidebar.expander("💾 Save Results", expanded=False):
-    # Show save controls if predictions or backtest are ready to save
-    if st.session_state.prediction_run and not st.session_state.loaded_from_storage:
-        st.info("✅ Predictions ready to save")
-
-        col_psave1, col_psave2 = st.columns(2)
-        with col_psave1:
-            if st.button(
-                "Save Predictions", type="primary", key="sidebar_save_predictions"
-            ):
-                st.session_state.auto_save_predictions = True
-        with col_psave2:
-            if st.button("Skip", key="sidebar_skip_predictions"):
-                st.session_state.auto_save_predictions = False
-
-    if st.session_state.backtest_run_all and st.session_state.storage_load_key:
-        st.info("✅ Backtest ready to save")
-
-        col_bsave1, col_bsave2 = st.columns(2)
-        with col_bsave1:
-            if st.button("Save Backtest", type="primary", key="sidebar_save_backtest"):
-                st.session_state.auto_save_backtest = True
-        with col_bsave2:
-            if st.button("Skip", key="sidebar_skip_backtest"):
-                st.session_state.auto_save_backtest = False
+    # Only allow saving when BOTH are present
+    has_both = st.session_state.prediction_run and st.session_state.backtest_run_all
+    is_saved = st.session_state.loaded_from_storage or st.session_state.storage_load_key
+    
+    if has_both:
+        if is_saved:
+            st.success("✅ Analysis saved to storage")
+        else:
+            st.info("💡 Predictions & Backtest ready")
+            if st.sidebar.button("💾 Save Full Analysis", type="primary", use_container_width=True, key="save_full_analysis_btn"):
+                st.session_state.auto_save_predictions = True # Using this flag to trigger the combined save
+    elif st.session_state.prediction_run:
+        st.warning("🧪 Run Backtest to enable saving")
+    elif st.session_state.backtest_run_all:
+        st.warning("🔮 Run Predictions to enable saving")
+    else:
+        st.caption("Run Analysis to enable saving")
 
 # ---- STORED ANALYSES SECTION ----
 st.sidebar.markdown("---")
@@ -563,23 +533,10 @@ if st.session_state.load_from_storage:
             backtest_config,
         ) = storage_manager.load_analysis(load_key)
 
-        if predictions:
+        if predictions or backtest_results:
             # Set up session state from loaded data
-            st.session_state.all_predictions = predictions
-            st.session_state.prediction_run = True
-            st.session_state.loaded_from_storage = True
-            st.session_state.storage_load_key = load_key
-
-            # Set sidebar defaults based on loaded data
-            st.session_state.loaded_symbol = metadata.get("symbol", "RECLTD.NS")
-            st.session_state.loaded_period = metadata.get("period", "1y")
-            st.session_state.loaded_interval = metadata.get("interval", "1d")
-            if pred_config:
-                st.session_state.loaded_pred_len = pred_config.get("pred_len", 30)
-                st.session_state.loaded_lookback = pred_config.get(
-                    "lookback_limit", 256
-                )
-
+            reset_analysis_state() # Clear current state first
+            
             # Load historical data for display
             with st.spinner(f"Loading data for {metadata['symbol']}..."):
                 df = load_data(
@@ -590,30 +547,44 @@ if st.session_state.load_from_storage:
                     df = df.sort_values("datetime").reset_index(drop=True)
                     st.session_state.df = df
                     st.session_state.data_loaded = True
+                    
+                    st.session_state.loaded_from_storage = True
+                    st.session_state.storage_load_key = load_key
 
-                    # Extract y_timestamp from predictions
+                    # Set sidebar defaults based on loaded data
+                    st.session_state.loaded_symbol = metadata.get("symbol", "RECLTD.NS")
+                    st.session_state.loaded_period = metadata.get("period", "1y")
+                    st.session_state.loaded_interval = metadata.get("interval", "1d")
+                    if pred_config:
+                        st.session_state.loaded_pred_len = pred_config.get("pred_len", 30)
+                        st.session_state.loaded_lookback = pred_config.get(
+                            "lookback_limit", 256
+                        )
+
+                    # Extract y_timestamp from predictions if available
                     if predictions:
+                        st.session_state.all_predictions = predictions
+                        st.session_state.prediction_run = True
                         first_pred = next(iter(predictions.values()))
                         if "pred_df" in first_pred:
                             st.session_state.y_timestamp = first_pred["pred_df"].index
-                        st.session_state.hist_df = (
-                            df.tail(150).copy().set_index("datetime")
-                        )
+                    
+                    st.session_state.hist_df = (
+                        df.tail(150).copy().set_index("datetime")
+                    )
 
                     # Load backtest if available
                     if backtest_results:
                         st.session_state.backtest_run_all = True
                         st.session_state.backtest_results_all = backtest_results
+                    else:
+                        st.session_state.backtest_run_all = False
+                        st.session_state.backtest_results_all = {}
 
-                    st.success(
-                        f"✅ Loaded from storage: {metadata['symbol']} ({metadata['period']})"
-                    )
-                    st.info(
-                        "💡 This is cached data. Click 'Generate New Analysis' to regenerate."
-                    )
-
-                    # Reset flag - no rerun needed, just continue rendering
+                    # Reset loading flag
                     st.session_state.load_from_storage = None
+                    st.success(f"✅ Loaded: {metadata['symbol']}")
+                    st.rerun()
 
 # Check if data is loaded
 if not st.session_state.data_loaded:
@@ -691,6 +662,10 @@ else:
 # ---- PREDICTION BUTTON ----
 if st.button("🔮 Run Predictions with All Selected Models", type="primary"):
     with st.spinner("Running Kronos predictions..."):
+        # Clear previous key when starting new prediction
+        st.session_state.storage_load_key = None
+        st.session_state.loaded_from_storage = False
+        
         all_predictions = {}
 
         for model_key in selected_models:
@@ -735,19 +710,16 @@ if st.button("🔮 Run Predictions with All Selected Models", type="primary"):
             st.session_state.prediction_run = True
             st.session_state.loaded_from_storage = False
             st.success(f"✅ Predictions complete for {len(all_predictions)} model(s)!")
-            st.info(
-                "💡 Use 'Save Results' panel in sidebar to save predictions to storage"
-            )
             st.rerun()
         else:
             st.error("No successful predictions. Please check the errors above.")
 
-# ---- HANDLE AUTO-SAVE AFTER PREDICTIONS ----
+# ---- HANDLE COMBINED SAVE ----
 if st.session_state.get("auto_save_predictions", False):
     storage_manager = st.session_state.storage_manager
     try:
         # Build prediction config
-        pred_config_to_save = {
+        save_pred_config = {
             "symbol": symbol,
             "period": period,
             "interval": interval,
@@ -755,86 +727,44 @@ if st.session_state.get("auto_save_predictions", False):
             "pred_len": pred_len,
             "lookback_limit": lookback_limit,
         }
-
-        # Save predictions to storage
-        save_key = storage_manager.save_analysis(
-            symbol=symbol,
-            period=period,
-            interval=interval,
-            pred_config=pred_config_to_save,
-            predictions=st.session_state.all_predictions,
-        )
-
-        st.success(f"✅ Saved to storage! Key: {save_key[:20]}...")
-        st.session_state.auto_save_predictions = False
-        st.session_state.storage_load_key = save_key
-        # Refresh the index so the UI updates
-        storage_manager.refresh_index()
-        # Don't set prediction_run to False - keep showing the results
-        # Don't rerun - just continue showing the dashboard
-    except Exception as e:
-        st.error(f"Failed to save: {str(e)}")
-
-# ---- HANDLE AUTO-SAVE BACKTEST ----
-if st.session_state.get("auto_save_backtest", False) and st.session_state.get(
-    "storage_load_key"
-):
-    storage_manager = st.session_state.storage_manager
-    try:
+        
         # Build backtest config
-        backtest_config_to_save = {
+        first_model = list(st.session_state.backtest_results_all.keys())[0]
+        save_bt_config = {
             "symbol": symbol,
             "period": period,
             "interval": interval,
             "models": selected_models,
-            "backtest_pred_len": st.session_state.backtest_results_all.get(
-                list(st.session_state.backtest_results_all.keys())[0], {}
-            ).get("pred_len", 30),
-            "backtest_lookback": 256,
+            "backtest_pred_len": st.session_state.backtest_results_all[first_model].get("pred_len", 30),
+            "backtest_lookback": st.session_state.get("backtest_lookback", 256),
         }
 
-        # Get existing analysis key or create new one
-        save_key = st.session_state.storage_load_key
+        # Save combined analysis to storage
+        save_key = storage_manager.save_analysis(
+            symbol=symbol,
+            period=period,
+            interval=interval,
+            pred_config=save_pred_config,
+            predictions=st.session_state.all_predictions,
+            backtest_config=save_bt_config,
+            backtest_results=st.session_state.backtest_results_all
+        )
 
-        # Remove old backtest file if exists and update with new backtest
-        analysis_dir = storage_manager.storage_root / save_key
-        backtest_file = analysis_dir / "backtest.pkl"
-
-        import pickle
-
-        # Save backtest data
-        bt_data = {
-            "backtest_results": st.session_state.backtest_results_all,
-            "config": backtest_config_to_save,
-        }
-
-        with open(backtest_file, "wb") as f:
-            pickle.dump(bt_data, f)
-
-        # Update metadata
-        import json
-
-        metadata_file = analysis_dir / "metadata.json"
-        if metadata_file.exists():
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
-            metadata["has_backtest"] = True
-            metadata["backtest_config"] = backtest_config_to_save
-            with open(metadata_file, "w") as f:
-                json.dump(metadata, f, indent=2, default=str)
-
-        # Update index in storage manager
-        storage_manager.index[save_key] = metadata
-        storage_manager._save_index()
-
-        st.success(f"✅ Backtest saved to storage!")
-        st.session_state.auto_save_backtest = False
+        st.session_state.storage_load_key = save_key
+        st.session_state.auto_save_predictions = False
+        st.session_state.loaded_from_storage = True
+        
         # Refresh the index so the UI updates
         storage_manager.refresh_index()
-        # Don't set backtest_run_all to False - keep showing the results
-        # Don't rerun - just continue showing the dashboard
+        st.success(f"✅ Full analysis saved!")
+        st.rerun()
     except Exception as e:
-        st.error(f"Failed to save backtest: {str(e)}")
+        st.error(f"Failed to save: {str(e)}")
+        st.session_state.auto_save_predictions = False
+
+# Remove old auto_save_backtest logic as it's consolidated above
+if "auto_save_backtest" in st.session_state:
+    st.session_state.auto_save_backtest = False
 
 # Display prediction results if prediction has been run
 if st.session_state.prediction_run and "all_predictions" in st.session_state:
@@ -844,36 +774,176 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
 
     if not all_predictions:
         st.warning("No predictions available. Please run predictions first.")
-        st.stop()
+    else:
+        # Create tabs for each model
+        tab_list = [KRONOS_MODELS[key]["name"] for key in all_predictions.keys()]
+        tabs = st.tabs(tab_list)
 
-    # Create tabs for each model
-    tab_list = [KRONOS_MODELS[key]["name"] for key in all_predictions.keys()]
-    tabs = st.tabs(tab_list)
+        # Display results for each model in separate tabs
+        for tab_idx, (model_key, predictions) in enumerate(all_predictions.items()):
+            with tabs[tab_idx]:
+                pred_df = predictions["pred_df"]
+                config = predictions["config"]
+                lookback_used = predictions["lookback_used"]
 
-    # Display results for each model in separate tabs
-    for tab_idx, (model_key, predictions) in enumerate(all_predictions.items()):
-        with tabs[tab_idx]:
-            pred_df = predictions["pred_df"]
-            config = predictions["config"]
-            lookback_used = predictions["lookback_used"]
+                # Ensure proper indexing
+                pred_df.index = pd.to_datetime(y_timestamp)
 
-            # Ensure proper indexing
-            pred_df.index = pd.to_datetime(y_timestamp)
+                # Display model information
+                st.info(
+                    f"**{config['name']}**\n\n"
+                    f"- Context Length: {config['context_length']} | Params: {config['params']}\n"
+                    f"- Lookback Used: {lookback_used} points\n"
+                    f"- {config['description']}"
+                )
 
-            # Display model information
-            st.info(
-                f"**{config['name']}**\n\n"
-                f"- Context Length: {config['context_length']} | Params: {config['params']}\n"
-                f"- Lookback Used: {lookback_used} points\n"
-                f"- {config['description']}"
-            )
+                # ---- PRICE CHART ----
+                st.subheader("📈 Interactive Forecast")
+                fig_price = go.Figure()
 
-            # ---- PRICE CHART ----
-            st.subheader("📈 Interactive Forecast")
-            fig_price = go.Figure()
+                # Historical Candlestick
+                fig_price.add_trace(
+                    go.Candlestick(
+                        x=hist_df.index,
+                        open=hist_df["open"],
+                        high=hist_df["high"],
+                        low=hist_df["low"],
+                        close=hist_df["close"],
+                        name="Historical",
+                        increasing_line_color="green",
+                        decreasing_line_color="red",
+                    )
+                )
 
-            # Historical Candlestick
-            fig_price.add_trace(
+                # Ensure prediction has all OHLC columns
+                required_cols = ["open", "high", "low", "close"]
+                for col in required_cols:
+                    if col not in pred_df.columns:
+                        pred_df[col] = pred_df["close"]  # fallback
+
+                # Prediction Candlestick
+                fig_price.add_trace(
+                    go.Candlestick(
+                        x=pred_df.index,
+                        open=pred_df["open"],
+                        high=pred_df["high"],
+                        low=pred_df["low"],
+                        close=pred_df["close"],
+                        name="Prediction",
+                        increasing_line_color="blue",
+                        decreasing_line_color="orange",
+                        opacity=0.7,
+                    )
+                )
+
+                # Optional: separator line between history & prediction
+                fig_price.add_vline(
+                    x=hist_df.index[-1], line_width=2, line_dash="dash", line_color="white"
+                )
+
+                fig_price.update_layout(
+                    title=f"{symbol} Price Forecast (OHLC) - {config['name']}",
+                    xaxis_title="Date",
+                    yaxis_title="Price",
+                    template="plotly_dark",
+                    height=650,
+                    xaxis_rangeslider_visible=True,
+                )
+
+                st.plotly_chart(fig_price, use_container_width=True)
+
+                # ---- VOLUME CHART ----
+                fig_vol = go.Figure()
+
+                fig_vol.add_trace(
+                    go.Bar(
+                        x=hist_df.index,
+                        y=hist_df["volume"],
+                        name="Historical Volume",
+                        marker_color="gray",
+                    )
+                )
+
+                fig_vol.add_trace(
+                    go.Bar(
+                        x=pred_df.index,
+                        y=pred_df["volume"],
+                        name="Predicted Volume",
+                        marker_color="orange",
+                    )
+                )
+
+                fig_vol.update_layout(
+                    title="Volume Forecast",
+                    template="plotly_dark",
+                    height=400,
+                )
+
+                st.plotly_chart(fig_vol, use_container_width=True)
+
+                # ---- METRICS ----
+                st.subheader("📊 Forecast Summary")
+
+                last_price = hist_df["close"].iloc[-1]
+                future_price = pred_df["close"].iloc[-1]
+                min_pred = pred_df["low"].min()
+                max_pred = pred_df["high"].max()
+                avg_pred_vol = pred_df["volume"].mean()
+                last_vol = hist_df["volume"].iloc[-1]
+
+                change_pct = ((future_price - last_price) / last_price) * 100
+                pred_range = max_pred - min_pred
+                vol_change_pct = ((avg_pred_vol - last_vol) / last_vol) * 100
+
+                # Determine trend direction and color indicators
+                trend = (
+                    "📈 Bullish"
+                    if change_pct > 0
+                    else "📉 Bearish" if change_pct < 0 else "➡️ Neutral"
+                )
+                trend_delta = f"{change_pct:+.2f}%" if change_pct != 0 else "0.00%"
+
+                high_delta = f"{((max_pred - last_price) / last_price) * 100:+.2f}%"
+                low_delta = f"{((min_pred - last_price) / last_price) * 100:+.2f}%"
+
+                # Display KPI cards in rows
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Current Price", f"{last_price:.2f}")
+                col2.metric("Predicted Price", f"{future_price:.2f}", trend_delta)
+                col3.metric("Predicted High", f"{max_pred:.2f}", high_delta)
+                col4.metric("Predicted Low", f"{min_pred:.2f}", low_delta)
+
+                # Second row of metrics
+                col5, col6, col7, col8 = st.columns(4)
+                col5.metric("Price Range", f"{pred_range:.2f}")
+                col6.metric("Trend", trend, trend_delta)
+                col7.metric("Avg Predicted Volume", f"{avg_pred_vol:,.0f}", f"{vol_change_pct:+.2f}%")
+                col8.metric("Forecast Period", f"{len(pred_df)} days")
+
+                st.markdown("---")
+
+                # ---- DETAILED DATA TABLE ----
+                st.subheader("📋 Prediction Details")
+                with st.expander("View detailed prediction data"):
+                    st.dataframe(
+                        pred_df[["open", "high", "low", "close", "volume"]].style.format(
+                            {
+                                "open": "{:.4f}",
+                                "high": "{:.4f}",
+                                "low": "{:.4f}",
+                                "close": "{:.4f}",
+                                "volume": "{:.0f}",
+                            }
+                        )
+                    )
+
+        # ---- COMPARISON ACROSS MODELS ----
+        if len(all_predictions) > 1:
+            st.markdown("---")
+            st.subheader("📊 Price Predictions Comparison Across Models")
+            fig_comparison_candle = go.Figure()
+
+            fig_comparison_candle.add_trace(
                 go.Candlestick(
                     x=hist_df.index,
                     open=hist_df["open"],
@@ -883,660 +953,294 @@ if st.session_state.prediction_run and "all_predictions" in st.session_state:
                     name="Historical",
                     increasing_line_color="green",
                     decreasing_line_color="red",
-                )
-            )
-
-            # Ensure prediction has all OHLC columns
-            required_cols = ["open", "high", "low", "close"]
-            for col in required_cols:
-                if col not in pred_df.columns:
-                    pred_df[col] = pred_df["close"]  # fallback
-
-            # Prediction Candlestick
-            fig_price.add_trace(
-                go.Candlestick(
-                    x=pred_df.index,
-                    open=pred_df["open"],
-                    high=pred_df["high"],
-                    low=pred_df["low"],
-                    close=pred_df["close"],
-                    name="Prediction",
-                    increasing_line_color="blue",
-                    decreasing_line_color="orange",
-                    opacity=0.7,
-                )
-            )
-
-            # Optional: separator line between history & prediction
-            fig_price.add_vline(
-                x=hist_df.index[-1], line_width=2, line_dash="dash", line_color="white"
-            )
-
-            fig_price.update_layout(
-                title=f"{symbol} Price Forecast (OHLC) - {config['name']}",
-                xaxis_title="Date",
-                yaxis_title="Price",
-                template="plotly_dark",
-                height=650,
-                xaxis_rangeslider_visible=True,
-            )
-
-            st.plotly_chart(fig_price, use_container_width=True)
-
-            # ---- VOLUME CHART ----
-            fig_vol = go.Figure()
-
-            fig_vol.add_trace(
-                go.Bar(
-                    x=hist_df.index,
-                    y=hist_df["volume"],
-                    name="Historical Volume",
-                    marker_color="gray",
-                )
-            )
-
-            fig_vol.add_trace(
-                go.Bar(
-                    x=pred_df.index,
-                    y=pred_df["volume"],
-                    name="Predicted Volume",
-                    marker_color="orange",
-                )
-            )
-
-            fig_vol.update_layout(
-                title="Volume Forecast",
-                template="plotly_dark",
-                height=400,
-            )
-
-            st.plotly_chart(fig_vol, use_container_width=True)
-
-            # ---- METRICS ----
-            st.subheader("📊 Forecast Summary")
-
-            last_price = hist_df["close"].iloc[-1]
-            future_price = pred_df["close"].iloc[-1]
-            min_pred = pred_df["low"].min()
-            max_pred = pred_df["high"].max()
-            avg_pred_vol = pred_df["volume"].mean()
-            last_vol = hist_df["volume"].iloc[-1]
-
-            change_pct = ((future_price - last_price) / last_price) * 100
-            pred_range = max_pred - min_pred
-            vol_change_pct = ((avg_pred_vol - last_vol) / last_vol) * 100
-
-            # Determine trend direction and color indicators
-            trend = (
-                "📈 Bullish"
-                if change_pct > 0
-                else "📉 Bearish" if change_pct < 0 else "➡️ Neutral"
-            )
-            trend_delta = f"{change_pct:+.2f}%" if change_pct != 0 else "0.00%"
-
-            price_delta = f"{change_pct:+.2f}%" if change_pct != 0 else "0.00%"
-            high_delta = f"{((max_pred - last_price) / last_price) * 100:+.2f}%"
-            low_delta = f"{((min_pred - last_price) / last_price) * 100:+.2f}%"
-
-            # Display KPI cards in rows
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric(
-                "Current Price",
-                f"{last_price:.2f}",
-                help="Last closing price from historical data",
-            )
-            col2.metric(
-                "Predicted Price",
-                f"{future_price:.2f}",
-                price_delta,
-                help="Predicted closing price at end of forecast period",
-            )
-            col3.metric(
-                "Predicted High",
-                f"{max_pred:.2f}",
-                high_delta,
-                help="Highest predicted price in forecast period",
-            )
-            col4.metric(
-                "Predicted Low",
-                f"{min_pred:.2f}",
-                low_delta,
-                help="Lowest predicted price in forecast period",
-            )
-
-            # Second row of metrics
-            col5, col6, col7, col8 = st.columns(4)
-            col5.metric(
-                "Price Range",
-                f"{pred_range:.2f}",
-                help="Spread between highest and lowest predicted prices",
-            )
-            col6.metric(
-                "Trend",
-                trend,
-                trend_delta,
-                help="Overall price direction based on prediction",
-            )
-            col7.metric(
-                "Avg Predicted Volume",
-                f"{avg_pred_vol:,.0f}",
-                f"{vol_change_pct:+.2f}%",
-                help="Average daily volume in forecast vs last historical",
-            )
-            col8.metric(
-                "Forecast Period",
-                f"{len(pred_df)} days",
-                help="Number of days in prediction horizon",
-            )
-
-            # Add a visual separator
-            st.markdown("---")
-
-            # ---- DETAILED DATA TABLE ----
-            st.subheader("📋 Prediction Details")
-            with st.expander("View detailed prediction data"):
-                st.dataframe(
-                    pred_df[["open", "high", "low", "close", "volume"]].style.format(
-                        {
-                            "open": "{:.4f}",
-                            "high": "{:.4f}",
-                            "low": "{:.4f}",
-                            "close": "{:.4f}",
-                            "volume": "{:.0f}",
-                        }
-                    )
-                )
-
-    # ---- COMPARISON ACROSS MODELS (Optional) ----
-    if len(all_predictions) > 1:
-        st.markdown("---")
-        st.subheader("🔄 Model Comparison")
-
-        # Create comparison dataframe
-        comparison_data = []
-        for model_key, predictions in all_predictions.items():
-            pred_df = predictions["pred_df"]
-            config = predictions["config"]
-
-            comparison_data.append(
-                {
-                    "Model": config["name"],
-                    "Context Length": config["context_length"],
-                    "Parameters": config["params"],
-                    "Final Price": f"{pred_df['close'].iloc[-1]:.4f}",
-                    "Min Predicted": f"{pred_df['low'].min():.4f}",
-                    "Max Predicted": f"{pred_df['high'].max():.4f}",
-                    "Avg Volume": f"{pred_df['volume'].mean():,.0f}",
-                }
-            )
-
-        comparison_df = pd.DataFrame(comparison_data)
-        st.dataframe(comparison_df, use_container_width=True)
-
-        # Comparison chart
-        st.subheader("📊 Price Predictions Comparison")
-        fig_comparison = go.Figure()
-
-        # Add forward predictions for each model
-        for model_key, predictions in all_predictions.items():
-            pred_df = predictions["pred_df"]
-            config = predictions["config"]
-
-            fig_comparison.add_trace(
-                go.Scatter(
-                    x=pred_df.index,
-                    y=pred_df["close"],
-                    mode="lines+markers",
-                    name=f"{config['name']} (Forward)",
-                    line=dict(width=2),
-                    marker=dict(size=6),
-                )
-            )
-
-        # Add historical data for reference
-        fig_comparison.add_trace(
-            go.Scatter(
-                x=hist_df.index,
-                y=hist_df["close"],
-                mode="lines",
-                name="Historical",
-                line=dict(color="gray", dash="dash", width=2),
-            )
-        )
-
-        # Add backtest predictions and actual values if available
-        if st.session_state.get("backtest_run_all", False) and st.session_state.get(
-            "backtest_results_all"
-        ):
-            backtest_results_all = st.session_state.backtest_results_all
-
-            # Add backtest predictions for each model
-            for model_key, backtest_result in backtest_results_all.items():
-                config = backtest_result["config"]
-                backtest_pred_df = backtest_result["pred_df"]
-
-                fig_comparison.add_trace(
-                    go.Scatter(
-                        x=backtest_pred_df.index,
-                        y=backtest_pred_df["close"],
-                        mode="lines+markers",
-                        name=f"{config['name']} (Backtest Pred)",
-                        line=dict(width=2, dash="dot"),
-                        marker=dict(size=5),
-                        opacity=0.7,
-                    )
-                )
-
-            # Get the actual test data from the first available backtest result
-            # (all models should have same test dates since they're from same data)
-            first_result = next(iter(backtest_results_all.values()))
-            test_df = first_result["test_df"]
-
-            fig_comparison.add_trace(
-                go.Scatter(
-                    x=test_df.index,
-                    y=test_df["close"],
-                    mode="lines+markers",
-                    name="Actual (Backtest Period)",
-                    line=dict(color="#FF6B6B", width=3),
-                    marker=dict(size=8, symbol="diamond"),
-                )
-            )
-
-        fig_comparison.update_layout(
-            title="Price Predictions Comparison Across Models",
-            xaxis_title="Date",
-            yaxis_title="Price",
-            template="plotly_dark",
-            height=600,
-            hovermode="x unified",
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-        )
-
-        st.plotly_chart(fig_comparison, use_container_width=True)
-
-        st.subheader("📈 Price Predictions Comparison (Candlestick)")
-        fig_comparison_candle = go.Figure()
-
-        fig_comparison_candle.add_trace(
-            go.Candlestick(
-                x=hist_df.index,
-                open=hist_df["open"],
-                high=hist_df["high"],
-                low=hist_df["low"],
-                close=hist_df["close"],
-                name="Historical",
-                increasing_line_color="green",
-                decreasing_line_color="red",
-                opacity=0.8,
-            )
-        )
-
-        candle_colors = [
-            ("blue", "orange"),
-            ("cyan", "magenta"),
-            ("yellow", "purple"),
-            ("lime", "deeppink"),
-        ]
-        comparison_required_cols = ["open", "high", "low", "close"]
-
-        for idx, (model_key, predictions) in enumerate(all_predictions.items()):
-            pred_df = predictions["pred_df"]
-            config = predictions["config"]
-
-            for col in comparison_required_cols:
-                if col not in pred_df.columns:
-                    pred_df[col] = pred_df["close"]
-
-            inc_color, dec_color = candle_colors[idx % len(candle_colors)]
-            fig_comparison_candle.add_trace(
-                go.Candlestick(
-                    x=pred_df.index,
-                    open=pred_df["open"],
-                    high=pred_df["high"],
-                    low=pred_df["low"],
-                    close=pred_df["close"],
-                    name=f"{config['name']} Prediction",
-                    increasing_line_color=inc_color,
-                    decreasing_line_color=dec_color,
-                    opacity=0.6,
-                )
-            )
-
-        if st.session_state.get("backtest_run_all", False) and st.session_state.get(
-            "backtest_results_all"
-        ):
-            backtest_results_all = st.session_state.backtest_results_all
-
-            for model_key, backtest_result in backtest_results_all.items():
-                config = backtest_result["config"]
-                backtest_pred_df = backtest_result["pred_df"]
-
-                for col in comparison_required_cols:
-                    if col not in backtest_pred_df.columns:
-                        backtest_pred_df[col] = backtest_pred_df["close"]
-
-                fig_comparison_candle.add_trace(
-                    go.Candlestick(
-                        x=backtest_pred_df.index,
-                        open=backtest_pred_df["open"],
-                        high=backtest_pred_df["high"],
-                        low=backtest_pred_df["low"],
-                        close=backtest_pred_df["close"],
-                        name=f"{config['name']} (Backtest Pred)",
-                        increasing_line_color="royalblue",
-                        decreasing_line_color="darkorange",
-                        opacity=0.5,
-                    )
-                )
-
-            first_result = next(iter(backtest_results_all.values()))
-            test_df = first_result["test_df"]
-
-            fig_comparison_candle.add_trace(
-                go.Scatter(
-                    x=test_df.index,
-                    y=test_df["close"],
-                    mode="lines+markers",
-                    name="Actual (Backtest Period)",
-                    line=dict(color="#FF6B6B", width=3),
-                    marker=dict(size=6, symbol="diamond"),
                     opacity=0.8,
                 )
             )
 
-        fig_comparison_candle.update_layout(
-            title="Price Predictions Comparison Across Models (Candlestick)",
-            xaxis_title="Date",
-            yaxis_title="Price",
-            template="plotly_dark",
-            height=700,
-            xaxis_rangeslider_visible=True,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-        )
+            candle_colors = [("blue", "orange"), ("cyan", "magenta"), ("yellow", "purple"), ("lime", "deeppink")]
+            comparison_required_cols = ["open", "high", "low", "close"]
 
-        st.plotly_chart(fig_comparison_candle, use_container_width=True)
+            for idx, (model_key, predictions) in enumerate(all_predictions.items()):
+                pred_df = predictions["pred_df"]
+                config = predictions["config"]
 
-    # ---- BACKTESTING SECTION ----
-    st.markdown("---")
-    st.subheader("🔍 Backtest Accuracy Check")
+                for col in comparison_required_cols:
+                    if col not in pred_df.columns:
+                        pred_df[col] = pred_df["close"]
 
-    # Backtest configuration
-    col_backtest1, col_backtest2 = st.columns(2)
-    with col_backtest1:
-        backtest_pred_len = st.slider(
-            "Backtest Period (days)", 5, 60, 30, key="backtest_period"
-        )
-    with col_backtest2:
-        backtest_lookback = st.slider(
-            "Backtest Lookback", 100, 512, 256, key="backtest_lookback"
-        )
-
-    if st.button(
-        "🧪 Run Backtest for All Models",
-        type="primary",
-        help="Test prediction accuracy using historical data",
-    ):
-        with st.spinner("Running backtests..."):
-            # Check if we have enough data
-            if len(df) < backtest_pred_len + 50:
-                st.error(
-                    f"Not enough data for backtest. Need at least {backtest_pred_len + 50} rows, but only have {len(df)}."
-                )
-            else:
-                backtest_results_all = {}
-
-                # Run backtest for each selected model
-                for model_key in selected_models:
-                    predictor, config = available_predictors[model_key]
-
-                    # Adjust lookback based on model's context length
-                    model_backtest_lookback = min(
-                        backtest_lookback, config["context_length"]
+                inc_color, dec_color = candle_colors[idx % len(candle_colors)]
+                fig_comparison_candle.add_trace(
+                    go.Candlestick(
+                        x=pred_df.index,
+                        open=pred_df["open"],
+                        high=pred_df["high"],
+                        low=pred_df["low"],
+                        close=pred_df["close"],
+                        name=f"{config['name']} Prediction",
+                        increasing_line_color=inc_color,
+                        decreasing_line_color=dec_color,
+                        opacity=0.6,
                     )
-
-                    try:
-                        pred_df, test_df = run_backtest(
-                            df,
-                            predictor,
-                            lookback=min(
-                                model_backtest_lookback, len(df) - backtest_pred_len
-                            ),
-                            pred_len=backtest_pred_len,
-                        )
-
-                        # Calculate metrics
-                        backtest_metrics = calculate_backtest_metrics(pred_df, test_df)
-
-                        backtest_results_all[model_key] = {
-                            "pred_df": pred_df,
-                            "test_df": test_df,
-                            "metrics": backtest_metrics,
-                            "pred_len": backtest_pred_len,
-                            "config": config,
-                        }
-                    except Exception as e:
-                        st.error(f"Backtest failed for {config['name']}: {str(e)}")
-                        continue
-
-                st.session_state.backtest_run_all = True
-                st.session_state.backtest_results_all = backtest_results_all
-                st.success(
-                    f"✅ Backtests completed for {len(backtest_results_all)} model(s)!"
                 )
-                st.info(
-                    "💡 Use 'Save Results' panel in sidebar to save backtest to storage"
-                )
-                st.rerun()
 
-    # Display backtest results
-    if st.session_state.get("backtest_run_all", False) and st.session_state.get(
-        "backtest_results_all"
-    ):
-        backtest_results_all = st.session_state.backtest_results_all
-
-        # ===========================
-        # CONSOLIDATED METRICS TABLE
-        # ===========================
-        st.subheader("📊 Backtest Metrics Comparison - All Models")
-
-        # Build consolidated metrics dataframe
-        metrics_comparison = []
-
-        for model_key, results in backtest_results_all.items():
-            config = results["config"]
-            metrics = results["metrics"]
-            pred_len = results["pred_len"]
-
-            # Extract metrics for close price (primary metric)
-            close_metrics = metrics.get("close", {})
-
-            metrics_comparison.append(
-                {
-                    "Model": config["name"],
-                    "Context Length": config["context_length"],
-                    "Parameters": config["params"],
-                    "MAE": close_metrics.get("MAE", 0),
-                    "RMSE": close_metrics.get("RMSE", 0),
-                    "MAPE (%)": close_metrics.get("MAPE (%)", 0),
-                    "Data Points": close_metrics.get("Count", 0),
-                    "Test Period": f"{pred_len} days",
-                }
+            fig_comparison_candle.update_layout(
+                title="Price Predictions Comparison Across Models (Candlestick)",
+                xaxis_title="Date",
+                yaxis_title="Price",
+                template="plotly_dark",
+                height=700,
+                xaxis_rangeslider_visible=True,
+                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             )
 
-        metrics_df = pd.DataFrame(metrics_comparison)
+            st.plotly_chart(fig_comparison_candle, use_container_width=True)
 
-        # Display the consolidated table with highlighting and proper contrast
-        def style_metrics_table(df):
-            """Apply styling with proper text contrast for dark theme"""
-            # Create a copy to avoid modifying original
-            styled = df.style
+# ---- BACKTESTING SECTION ----
+st.markdown("---")
+st.subheader("🔍 Backtest Accuracy Check")
 
-            # Define color schemes with good contrast
-            # Green background with dark text for best (min) values
-            # Red background with white text for worst (max) values
-            for col in ["MAE", "RMSE", "MAPE (%)"]:
-                if col in df.columns:
-                    # Apply styling for min values (best - green background, dark text)
-                    styled = styled.map(
-                        lambda x: (
-                            "background-color: #90EE90; color: #000000; font-weight: bold"
-                            if x == df[col].min()
-                            else ""
-                        ),
-                        subset=[col],
-                    )
+# Backtest configuration
+col_backtest1, col_backtest2 = st.columns(2)
+with col_backtest1:
+    backtest_pred_len = st.slider(
+        "Backtest Period (days)", 5, 60, 30, key="backtest_period"
+    )
+with col_backtest2:
+    backtest_lookback = st.slider(
+        "Backtest Lookback", 100, 512, 256, key="backtest_lookback"
+    )
 
-                    # Apply styling for max values (worst - red background, white text)
-                    styled = styled.map(
-                        lambda x: (
-                            "background-color: #FF6B6B; color: #FFFFFF; font-weight: bold"
-                            if x == df[col].max()
-                            else ""
-                        ),
-                        subset=[col],
-                    )
-
-            # Format the numeric columns for display
-            styled = styled.format(
-                {
-                    "MAE": "{:.4f}",
-                    "RMSE": "{:.4f}",
-                    "MAPE (%)": "{:.2f}%",
-                }
+if st.button(
+    "🧪 Run Backtest for All Models",
+    type="primary",
+    help="Test prediction accuracy using historical data",
+):
+    with st.spinner("Running backtests..."):
+        # Check if we have enough data
+        if len(df) < backtest_pred_len + 50:
+            st.error(
+                f"Not enough data for backtest. Need at least {backtest_pred_len + 50} rows, but only have {len(df)}."
             )
+        else:
+            backtest_results_all = {}
 
-            return styled
+            # Run backtest for each selected model
+            for model_key in selected_models:
+                predictor, config = available_predictors[model_key]
 
-        st.dataframe(
-            style_metrics_table(metrics_df),
-            use_container_width=True,
-            hide_index=True,
-        )
+                # Adjust lookback based on model's context length
+                model_backtest_lookback = min(
+                    backtest_lookback, config["context_length"]
+                )
 
-        # Add explanation
-        st.caption(
-            "🟢 **Light Green (black text)** = Best (lowest error) | 🔴 **Red (white text)** = Worst (highest error) | "
-            "Lower MAE, RMSE, and MAPE values indicate better prediction accuracy"
-        )
-
-        st.markdown("---")
-
-        # ===========================
-        # INDIVIDUAL MODEL TABS
-        # ===========================
-        # Create tabs for backtest results
-        backtest_tab_list = [
-            backtest_results_all[k]["config"]["name"]
-            for k in backtest_results_all.keys()
-        ]
-        backtest_tabs = st.tabs(backtest_tab_list)
-
-        for tab_idx, (model_key, results) in enumerate(backtest_results_all.items()):
-            with backtest_tabs[tab_idx]:
-                pred_df = results["pred_df"]
-                test_df = results["test_df"]
-                backtest_metrics = results["metrics"]
-                config = results["config"]
-
-                # Display metrics
-                st.subheader(f"📊 Backtest Metrics - {config['name']}")
-
-                for col_name, metrics in backtest_metrics.items():
-                    with st.expander(
-                        f"{col_name.upper()} - Accuracy Metrics", expanded=True
-                    ):
-                        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(
-                            4
-                        )
-
-                        metric_col1.metric(
-                            "MAE",
-                            f"{metrics['MAE']:.4f}",
-                            help="Mean Absolute Error - lower is better",
-                        )
-                        metric_col2.metric(
-                            "RMSE",
-                            f"{metrics['RMSE']:.4f}",
-                            help="Root Mean Square Error - lower is better",
-                        )
-                        metric_col3.metric(
-                            "MAPE (%)",
-                            f"{metrics['MAPE (%)']:.2f}%",
-                            help="Mean Absolute Percentage Error - lower is better",
-                        )
-                        metric_col4.metric(
-                            "Data Points",
-                            f"{metrics['Count']}",
-                            help="Number of data points used in calculation",
-                        )
-
-                # Plot backtest results
-                st.subheader(f"📈 Backtest: Actual vs Predicted - {config['name']}")
-                fig_backtest = plot_backtest_results(test_df, pred_df)
-                st.plotly_chart(fig_backtest, use_container_width=True)
-
-                # Show data comparison table
-                st.subheader("📋 Detailed Comparison")
-                comparison_df = pd.DataFrame(
-                    {
-                        "Actual_Close": (
-                            test_df["close"] if "close" in test_df.columns else None
+                try:
+                    pred_df, test_df = run_backtest(
+                        df,
+                        predictor,
+                        lookback=min(
+                            model_backtest_lookback, len(df) - backtest_pred_len
                         ),
-                        "Predicted_Close": (
-                            pred_df["close"] if "close" in pred_df.columns else None
-                        ),
+                        pred_len=backtest_pred_len,
+                    )
+
+                    # Calculate metrics
+                    backtest_metrics = calculate_backtest_metrics(pred_df, test_df)
+
+                    backtest_results_all[model_key] = {
+                        "pred_df": pred_df,
+                        "test_df": test_df,
+                        "metrics": backtest_metrics,
+                        "pred_len": backtest_pred_len,
+                        "config": config,
                     }
-                )
-                comparison_df["Error"] = (
-                    comparison_df["Actual_Close"] - comparison_df["Predicted_Close"]
-                )
-                comparison_df["Error_%"] = (
-                    comparison_df["Error"] / comparison_df["Actual_Close"] * 100
-                ).round(2)
+                except Exception as e:
+                    st.error(f"Backtest failed for {config['name']}: {str(e)}")
+                    continue
 
-                st.dataframe(
-                    comparison_df.style.background_gradient(
-                        subset=["Error_%"], cmap="RdYlGn", axis=0
+            st.session_state.backtest_run_all = True
+            st.session_state.backtest_results_all = backtest_results_all
+            st.success(
+                f"✅ Backtests completed for {len(backtest_results_all)} model(s)!"
+            )
+            st.rerun()
+
+# Display backtest results
+if st.session_state.get("backtest_run_all", False) and st.session_state.get(
+    "backtest_results_all"
+):
+    backtest_results_all = st.session_state.backtest_results_all
+
+    # ===========================
+    # CONSOLIDATED METRICS TABLE
+    # ===========================
+    st.subheader("📊 Backtest Metrics Comparison - All Models")
+
+    # Build consolidated metrics dataframe
+    metrics_comparison = []
+
+    for model_key, results in backtest_results_all.items():
+        config = results["config"]
+        metrics = results["metrics"]
+        pred_len = results["pred_len"]
+
+        # Extract metrics for close price (primary metric)
+        close_metrics = metrics.get("close", {})
+
+        metrics_comparison.append(
+            {
+                "Model": config["name"],
+                "Context Length": config["context_length"],
+                "Parameters": config["params"],
+                "MAE": close_metrics.get("MAE", 0),
+                "RMSE": close_metrics.get("RMSE", 0),
+                "MAPE (%)": close_metrics.get("MAPE (%)", 0),
+                "Data Points": close_metrics.get("Count", 0),
+                "Test Period": f"{pred_len} days",
+            }
+        )
+
+    metrics_df = pd.DataFrame(metrics_comparison)
+
+    # Display the consolidated table with highlighting and proper contrast
+    def style_metrics_table(df):
+        """Apply styling with proper text contrast for dark theme"""
+        # Create a copy to avoid modifying original
+        styled = df.style
+
+        # Define color schemes with good contrast
+        for col in ["MAE", "RMSE", "MAPE (%)"]:
+            if col in df.columns:
+                # Apply styling for min values (best - green background, dark text)
+                styled = styled.map(
+                    lambda x: (
+                        "background-color: #90EE90; color: #000000; font-weight: bold"
+                        if x == df[col].min()
+                        else ""
+                    ),
+                    subset=[col],
+                )
+
+                # Apply styling for max values (worst - red background, white text)
+                styled = styled.map(
+                    lambda x: (
+                        "background-color: #FF6B6B; color: #FFFFFF; font-weight: bold"
+                        if x == df[col].max()
+                        else ""
+                    ),
+                    subset=[col],
+                )
+
+        # Format the numeric columns for display
+        styled = styled.format(
+            {
+                "MAE": "{:.4f}",
+                "RMSE": "{:.4f}",
+                "MAPE (%)": "{:.2f}%",
+            }
+        )
+
+        return styled
+
+    st.dataframe(
+        style_metrics_table(metrics_df),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # Add explanation
+    st.caption(
+        "🟢 **Light Green (black text)** = Best (lowest error) | 🔴 **Red (white text)** = Worst (highest error) | "
+        "Lower MAE, RMSE, and MAPE values indicate better prediction accuracy"
+    )
+
+    st.markdown("---")
+
+    # ===========================
+    # INDIVIDUAL MODEL TABS
+    # ===========================
+    # Create tabs for backtest results
+    backtest_tab_list = [
+        backtest_results_all[k]["config"]["name"]
+        for k in backtest_results_all.keys()
+    ]
+    backtest_tabs = st.tabs(backtest_tab_list)
+
+    for tab_idx, (model_key, results) in enumerate(backtest_results_all.items()):
+        with backtest_tabs[tab_idx]:
+            pred_df = results["pred_df"]
+            test_df = results["test_df"]
+            backtest_metrics = results["metrics"]
+            config = results["config"]
+
+            # Display metrics
+            st.subheader(f"📊 Backtest Metrics - {config['name']}")
+
+            for col_name, metrics in backtest_metrics.items():
+                with st.expander(
+                    f"{col_name.upper()} - Accuracy Metrics", expanded=True
+                ):
+                    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                    metric_col1.metric("MAE", f"{metrics['MAE']:.4f}")
+                    metric_col2.metric("RMSE", f"{metrics['RMSE']:.4f}")
+                    metric_col3.metric("MAPE (%)", f"{metrics['MAPE (%)']:.2f}%")
+                    metric_col4.metric("Data Points", f"{metrics['Count']}")
+
+            # Plot backtest results
+            st.subheader(f"📈 Backtest: Actual vs Predicted - {config['name']}")
+            fig_backtest = plot_backtest_results(test_df, pred_df)
+            st.plotly_chart(fig_backtest, use_container_width=True)
+
+            # Show data comparison table
+            st.subheader("📋 Detailed Comparison")
+            comparison_df = pd.DataFrame(
+                {
+                    "Actual_Close": test_df["close"] if "close" in test_df.columns else None,
+                    "Predicted_Close": pred_df["close"] if "close" in pred_df.columns else None,
+                }
+            )
+            comparison_df["Error"] = comparison_df["Actual_Close"] - comparison_df["Predicted_Close"]
+            comparison_df["Error_%"] = (comparison_df["Error"] / comparison_df["Actual_Close"] * 100).round(2)
+
+            st.dataframe(
+                comparison_df.style.background_gradient(
+                    subset=["Error_%"], cmap="RdYlGn", axis=0
+                )
+            )
+
+            # Volume comparison if available
+            if "volume" in test_df.columns and "volume" in pred_df.columns:
+                st.subheader("📊 Volume: Actual vs Predicted")
+                fig_vol_backtest = go.Figure()
+
+                fig_vol_backtest.add_trace(
+                    go.Bar(
+                        x=test_df.index,
+                        y=test_df["volume"],
+                        name="Actual Volume",
+                        marker_color="blue",
+                        opacity=0.7,
                     )
                 )
 
-                # Volume comparison if available
-                if "volume" in test_df.columns and "volume" in pred_df.columns:
-                    st.subheader("📊 Volume: Actual vs Predicted")
-                    fig_vol_backtest = go.Figure()
-
-                    fig_vol_backtest.add_trace(
-                        go.Bar(
-                            x=test_df.index,
-                            y=test_df["volume"],
-                            name="Actual Volume",
-                            marker_color="blue",
-                            opacity=0.7,
-                        )
+                fig_vol_backtest.add_trace(
+                    go.Bar(
+                        x=pred_df.index,
+                        y=pred_df["volume"],
+                        name="Predicted Volume",
+                        marker_color="red",
+                        opacity=0.7,
                     )
-
-                    fig_vol_backtest.add_trace(
-                        go.Bar(
-                            x=pred_df.index,
-                            y=pred_df["volume"],
-                            name="Predicted Volume",
-                            marker_color="red",
-                            opacity=0.7,
-                        )
-                    )
-
-                    fig_vol_backtest.update_layout(
-                        title=f"Backtest: Volume Comparison - {config['name']}",
-                        xaxis_title="Date",
-                        yaxis_title="Volume",
-                        template="plotly_dark",
-                        height=400,
-                        barmode="group",
-                    )
-
-                    st.plotly_chart(fig_vol_backtest, use_container_width=True)
-
-                st.info(
-                    f"💡 Backtest results from the last run with {results['pred_len']} days prediction period."
                 )
+
+                fig_vol_backtest.update_layout(
+                    title=f"Backtest: Volume Comparison - {config['name']}",
+                    xaxis_title="Date",
+                    yaxis_title="Volume",
+                    template="plotly_dark",
+                    height=400,
+                    barmode="group",
+                )
+
+                st.plotly_chart(fig_vol_backtest, use_container_width=True)
+
+            st.info(f"💡 Backtest results from the last run with {results['pred_len']} days prediction period.")

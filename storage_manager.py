@@ -63,12 +63,15 @@ class AnalysisStorageManager:
         """Generate unique key for analysis based on all parameters."""
         pred_hash = self._generate_config_hash(pred_config)
         bt_hash = self._generate_config_hash(backtest_config or {})
+        
+        # Get current date
+        date_str = datetime.now().strftime("%Y%m%d")
 
         # Clean symbol for folder name
         clean_symbol = symbol.replace(".", "_")
 
-        # Format: SYMBOL_PERIOD_INTERVAL_PREDHASH_BTHASH
-        key = f"{clean_symbol}_{period}_{interval}_p{pred_hash}"
+        # Format: SYMBOL_PERIOD_INTERVAL_DATE_PREDHASH_BTHASH
+        key = f"{clean_symbol}_{period}_{interval}_{date_str}_p{pred_hash}"
         if backtest_config:
             key += f"_b{bt_hash}"
 
@@ -108,16 +111,19 @@ class AnalysisStorageManager:
         analysis_dir = self.storage_root / key
         analysis_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save prediction data
-        pred_data = {
-            "all_predictions": predictions,
-            "config": pred_config,
-        }
-        with open(analysis_dir / "predictions.pkl", "wb") as f:
-            pickle.dump(pred_data, f)
+        # Save prediction data if available
+        has_predictions = bool(predictions)
+        if has_predictions:
+            pred_data = {
+                "all_predictions": predictions,
+                "config": pred_config,
+            }
+            with open(analysis_dir / "predictions.pkl", "wb") as f:
+                pickle.dump(pred_data, f)
 
         # Save backtest data if available
-        if backtest_results:
+        has_backtest = bool(backtest_results)
+        if has_backtest:
             bt_data = {
                 "backtest_results": backtest_results,
                 "config": backtest_config,
@@ -131,16 +137,24 @@ class AnalysisStorageManager:
             "period": period,
             "interval": interval,
             "created_at": datetime.now().isoformat(),
-            "pred_config": pred_config,
-            "backtest_config": backtest_config,
-            "has_predictions": True,
-            "has_backtest": bool(backtest_results),
-            "num_models": len(predictions),
-            "model_names": [
+            "pred_config": pred_config if has_predictions else None,
+            "backtest_config": backtest_config if has_backtest else None,
+            "has_predictions": has_predictions,
+            "has_backtest": has_backtest,
+            "num_models": len(predictions) if has_predictions else (len(backtest_results) if has_backtest else 0),
+            "model_names": [],
+        }
+
+        if has_predictions:
+            metadata["model_names"] = [
                 predictions[m].get("config", {}).get("name", m)
                 for m in predictions.keys()
-            ],
-        }
+            ]
+        elif has_backtest:
+            metadata["model_names"] = [
+                backtest_results[m].get("config", {}).get("name", m)
+                for m in backtest_results.keys()
+            ]
 
         with open(analysis_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2, default=str)
@@ -171,11 +185,15 @@ class AnalysisStorageManager:
             return None, None, None, None
 
         try:
-            # Load predictions
-            with open(analysis_dir / "predictions.pkl", "rb") as f:
-                pred_data = pickle.load(f)
-            predictions = pred_data.get("all_predictions", {})
-            pred_config = pred_data.get("config", {})
+            # Load predictions if available
+            predictions = {}
+            pred_config = {}
+            pred_file = analysis_dir / "predictions.pkl"
+            if pred_file.exists():
+                with open(pred_file, "rb") as f:
+                    pred_data = pickle.load(f)
+                predictions = pred_data.get("all_predictions", {})
+                pred_config = pred_data.get("config", {})
 
             # Load backtest if available
             backtest_results = None
@@ -402,3 +420,57 @@ class AnalysisStorageManager:
         except Exception as e:
             print(f"Error importing analysis: {e}")
             return None
+
+    def update_backtest(
+        self,
+        key: str,
+        backtest_results: Dict,
+        backtest_config: Dict,
+    ) -> bool:
+        """
+        Add or update backtest results for an existing analysis.
+
+        Args:
+            key: Analysis key
+            backtest_results: Backtest results dictionary
+            backtest_config: Backtest configuration dictionary
+
+        Returns:
+            True if successful, False otherwise
+        """
+        analysis_dir = self.storage_root / key
+        if not analysis_dir.exists():
+            print(f"Analysis {key} not found for backtest update.")
+            return False
+
+        try:
+            # Save backtest data
+            bt_data = {
+                "backtest_results": backtest_results,
+                "config": backtest_config,
+            }
+            with open(analysis_dir / "backtest.pkl", "wb") as f:
+                pickle.dump(bt_data, f)
+
+            # Update metadata
+            metadata = self.get_analysis_metadata(key)
+            if not metadata:
+                # Re-create basic metadata if missing
+                metadata = {
+                    "created_at": datetime.now().isoformat(),
+                }
+
+            metadata["has_backtest"] = True
+            metadata["backtest_config"] = backtest_config
+
+            with open(analysis_dir / "metadata.json", "w") as f:
+                json.dump(metadata, f, indent=2, default=str)
+
+            # Update index
+            self.index[key] = metadata
+            self._save_index()
+
+            return True
+        except Exception as e:
+            print(f"Error updating backtest for {key}: {e}")
+            return False
