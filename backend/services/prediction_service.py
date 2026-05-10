@@ -139,7 +139,7 @@ class PredictionService:
         
         return results
 
-    def run_backtest(self, model_key: str, df: pd.DataFrame, lookback: int = 256, pred_len: int = 30):
+    def run_backtest(self, model_key: str, df: pd.DataFrame, lookback: int = 400, pred_len: int = 40):
         predictor, config = self.get_model(model_key)
         
         if predictor is None:

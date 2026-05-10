@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   TrendingUp, Database, RefreshCw, Cpu, Save, Table as TableIcon
@@ -13,43 +13,52 @@ import ModelComparison from './components/ModelComparison';
 
 const API_BASE = 'http://localhost:8000/api';
 
+let sessionCounter = 0;
+const makeSessionId = () => `sess_${Date.now()}_${++sessionCounter}`;
+
+const defaultSession = (overrides = {}) => ({
+  id: makeSessionId(),
+  symbol: 'RECLTD.NS',
+  period: '1y',
+  interval: '1d',
+  predLen: 30,
+  lookback: 256,
+  backtestPredLen: 30,
+  backtestLookback: 256,
+  selectedModels: ['kronos-base'],
+  data: [],
+  predictions: {},
+  backtestResultsAll: null,
+  summaryMetrics: {},
+  activeModelTab: null,
+  showRawData: false,
+  ...overrides,
+});
+
 function App() {
-  const [activeSymbol, setActiveSymbol] = useState('RECLTD.NS');
-  const [period, setPeriod] = useState('1y');
-  const [interval, setInterval] = useState('1d');
-  const [lookback, setLookback] = useState(256);
-  const [predLen, setPredLen] = useState(30);
+  // Session-based state
+  const [sessions, setSessions] = useState(() => {
+    const init = defaultSession();
+    return { [init.id]: init };
+  });
+  const [sessionOrder, setSessionOrder] = useState(() => Object.keys(sessions));
+  const [activeSessionId, setActiveSessionId] = useState(() => Object.keys(sessions)[0]);
 
-  const [activeTabs, setActiveTabs] = useState([]); 
-  const [data, setData] = useState([]);
-  const [predictions, setPredictions] = useState({});
+  // Global state (not per-session)
   const [models, setModels] = useState({});
-  const [selectedModels, setSelectedModels] = useState(['kronos-base']);
   const [loading, setLoading] = useState(false);
-  const [activeModelTab, setActiveModelTab] = useState(null);
-
-  // Backtest state - separate config matching Streamlit
-  const [backtestResultsAll, setBacktestResultsAll] = useState(null);
-  const [backtestPredLen, setBtPredLen] = useState(30);
-  const [backtestLookback, setBtLookback] = useState(256);
-
-  // Storage
   const [savedAnalyses, setSavedAnalyses] = useState([]);
   const [view, setView] = useState('dashboard');
 
-  // Summary metrics (per-model)
-  const [summaryMetrics, setSummaryMetrics] = useState({});
+  // Convenience: active session
+  const s = sessions[activeSessionId] || defaultSession();
 
-  // Raw data visibility
-  const [showRawData, setShowRawData] = useState(false);
+  const updateSession = useCallback((updates, sessionId) => {
+    const id = sessionId || activeSessionId;
+    setSessions(prev => ({ ...prev, [id]: { ...prev[id], ...updates } }));
+  }, [activeSessionId]);
 
   useEffect(() => { fetchModels(); fetchAnalyses(); }, []);
-
-  useEffect(() => {
-    if (selectedModels.length > 0 && !activeModelTab) {
-      setActiveModelTab(selectedModels[0]);
-    }
-  }, [selectedModels]);
 
   const fetchModels = async () => {
     try { const res = await axios.get(`${API_BASE}/models`); setModels(res.data); }
@@ -61,88 +70,111 @@ function App() {
     catch (err) { console.error('Error fetching analyses:', err); }
   };
 
-  const loadSymbolData = async (symbolOverride) => {
-    const sym = symbolOverride || activeSymbol;
-    if (!sym) return;
+  // --- Session management ---
+  const addNewSession = (overrides = {}) => {
+    const sess = defaultSession(overrides);
+    setSessions(prev => ({ ...prev, [sess.id]: sess }));
+    setSessionOrder(prev => [...prev, sess.id]);
+    setActiveSessionId(sess.id);
+    setView('dashboard');
+    return sess.id;
+  };
+
+  const switchSession = (sessionId) => {
+    if (sessions[sessionId]) {
+      setActiveSessionId(sessionId);
+      setView('dashboard');
+    }
+  };
+
+  const closeSession = (sessionId) => {
+    setSessionOrder(prev => prev.filter(id => id !== sessionId));
+    setSessions(prev => {
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+    if (activeSessionId === sessionId) {
+      const remaining = sessionOrder.filter(id => id !== sessionId);
+      if (remaining.length > 0) {
+        setActiveSessionId(remaining[remaining.length - 1]);
+      } else {
+        const newSess = defaultSession();
+        setSessions(prev => ({ ...prev, [newSess.id]: newSess }));
+        setSessionOrder([newSess.id]);
+        setActiveSessionId(newSess.id);
+      }
+    }
+  };
+
+  // --- Metrics calculator ---
+  const calcMetrics = (preds, histData) => {
+    if (!histData || histData.length === 0 || !preds) return {};
+    const results = {};
+    const lastHist = histData[histData.length - 1];
+    Object.keys(preds).forEach(mk => {
+      const pred = preds[mk];
+      if (pred.error || !pred.pred_df || pred.pred_df.length === 0) return;
+      const df = pred.pred_df;
+      const fp = df[df.length - 1].close;
+      const lp = lastHist.close;
+      const cp = ((fp - lp) / lp) * 100;
+      const mn = Math.min(...df.map(d => d.low || d.close));
+      const mx = Math.max(...df.map(d => d.high || d.close));
+      const av = df.reduce((s, d) => s + (d.volume || 0), 0) / df.length;
+      const lv = lastHist.volume;
+      results[mk] = {
+        lastPrice: lp, futurePrice: fp, changePct: cp, minPred: mn, maxPred: mx,
+        predRange: mx - mn, avgPredVol: av,
+        volChangePct: lv ? ((av - lv) / lv) * 100 : 0,
+        trend: cp > 0 ? 'Bullish' : cp < 0 ? 'Bearish' : 'Neutral',
+        highDelta: ((mx - lp) / lp) * 100,
+        lowDelta: ((mn - lp) / lp) * 100,
+        period: df.length
+      };
+    });
+    return results;
+  };
+
+  // --- Data / Prediction / Backtest ---
+  const loadSymbolData = async () => {
+    if (!s.symbol) return;
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE}/data`, { params: { symbol: sym, period, interval } });
-      setData(res.data);
-      setPredictions({});
-      setBacktestResultsAll(null);
-      setSummaryMetrics({});
-      if (!activeTabs.includes(sym)) setActiveTabs(prev => [...prev, sym]);
+      const res = await axios.get(`${API_BASE}/data`, { params: { symbol: s.symbol, period: s.period, interval: s.interval } });
+      updateSession({ data: res.data, predictions: {}, backtestResultsAll: null, summaryMetrics: {} });
     } catch (err) {
       console.error('Error loading data:', err);
       alert('Failed to load data for this symbol/config.');
     } finally { setLoading(false); }
   };
 
-  const calculateSummaryMetrics = (preds, histData) => {
-    const srcData = histData || data;
-    if (!srcData || srcData.length === 0 || !preds) return {};
-    const results = {};
-    const lastHist = srcData[srcData.length - 1];
-    Object.keys(preds).forEach(modelKey => {
-      const pred = preds[modelKey];
-      if (pred.error) return;
-      const predDf = pred.pred_df;
-      if (!predDf || predDf.length === 0) return;
-      const lastPred = predDf[predDf.length - 1];
-      const futurePrice = lastPred.close;
-      const lastPrice = lastHist.close;
-      const changePct = ((futurePrice - lastPrice) / lastPrice) * 100;
-      const minPred = Math.min(...predDf.map(d => d.low || d.close));
-      const maxPred = Math.max(...predDf.map(d => d.high || d.close));
-      const avgPredVol = predDf.reduce((sum, d) => sum + (d.volume || 0), 0) / predDf.length;
-      const lastVol = lastHist.volume;
-      results[modelKey] = {
-        lastPrice, futurePrice, changePct, minPred, maxPred,
-        predRange: maxPred - minPred, avgPredVol,
-        volChangePct: lastVol ? ((avgPredVol - lastVol) / lastVol) * 100 : 0,
-        trend: changePct > 0 ? 'Bullish' : changePct < 0 ? 'Bearish' : 'Neutral',
-        highDelta: ((maxPred - lastPrice) / lastPrice) * 100,
-        lowDelta: ((minPred - lastPrice) / lastPrice) * 100,
-        period: predDf.length
-      };
-    });
-    setSummaryMetrics(results);
-  };
-
-  const closeTab = (symbolToClose) => {
-    setActiveTabs(prev => prev.filter(s => s !== symbolToClose));
-    if (activeSymbol === symbolToClose) {
-      setData([]); setPredictions({}); setBacktestResultsAll(null); setSummaryMetrics({});
-    }
-  };
-
   const runPredictions = async () => {
-    if (data.length === 0) return;
+    if (s.data.length === 0) return;
     setLoading(true);
     try {
       const res = await axios.post(`${API_BASE}/predict`, {
-        symbol: activeSymbol, period, interval,
-        models: selectedModels, pred_len: predLen, lookback_limit: lookback
+        symbol: s.symbol, period: s.period, interval: s.interval,
+        models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback
       });
-      setPredictions(res.data);
-      calculateSummaryMetrics(res.data);
+      const metrics = calcMetrics(res.data, s.data);
       const firstValid = Object.keys(res.data).find(k => !res.data[k].error);
-      if (firstValid) setActiveModelTab(firstValid);
+      updateSession({ predictions: res.data, summaryMetrics: metrics, activeModelTab: firstValid || s.activeModelTab });
     } catch (err) { console.error('Error running predictions:', err); }
     finally { setLoading(false); }
   };
 
   const runBacktestAll = async () => {
-    if (data.length === 0 || selectedModels.length === 0) return;
+    if (s.data.length === 0 || s.selectedModels.length === 0) return;
     setLoading(true);
     try {
       const res = await axios.post(`${API_BASE}/backtest-all`, {
-        symbol: activeSymbol, period, interval,
-        models: selectedModels,
-        backtest_pred_len: backtestPredLen,
-        backtest_lookback: backtestLookback
+        symbol: s.symbol, period: s.period, interval: s.interval,
+        models: s.selectedModels,
+        backtest_pred_len: s.backtestPredLen,
+        backtest_lookback: s.backtestLookback
       });
-      setBacktestResultsAll(res.data);
+      updateSession({ backtestResultsAll: res.data });
     } catch (err) {
       console.error('Error running backtest:', err);
       alert(err.response?.data?.detail || 'Backtest failed');
@@ -150,22 +182,22 @@ function App() {
   };
 
   const saveAnalysis = async () => {
-    const hasPreds = Object.keys(predictions).length > 0;
-    const hasBt = backtestResultsAll && Object.keys(backtestResultsAll).length > 0;
+    const hasPreds = Object.keys(s.predictions).length > 0;
+    const hasBt = s.backtestResultsAll && Object.keys(s.backtestResultsAll).length > 0;
     if (!hasPreds) return;
     try {
       await axios.post(`${API_BASE}/analyses`, {
-        symbol: activeSymbol, period, interval,
-        pred_config: { symbol: activeSymbol, period, interval, models: selectedModels, pred_len: predLen, lookback_limit: lookback },
-        predictions,
-        backtest_results: hasBt ? backtestResultsAll : null,
-        backtest_config: hasBt ? { symbol: activeSymbol, period, interval, models: selectedModels, lookback: backtestLookback, pred_len: backtestPredLen } : null
+        symbol: s.symbol, period: s.period, interval: s.interval,
+        pred_config: { symbol: s.symbol, period: s.period, interval: s.interval, models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback },
+        predictions: s.predictions,
+        backtest_results: hasBt ? s.backtestResultsAll : null,
+        backtest_config: hasBt ? { symbol: s.symbol, period: s.period, interval: s.interval, models: s.selectedModels, lookback: s.backtestLookback, pred_len: s.backtestPredLen } : null
       });
       fetchAnalyses();
       alert('Analysis saved successfully!');
     } catch (err) {
-      console.error('Error saving analysis:', err);
-      alert('Failed to save analysis: ' + (err.response?.data?.detail || err.message));
+      console.error('Error saving:', err);
+      alert('Failed to save: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -174,72 +206,66 @@ function App() {
     try {
       const res = await axios.get(`${API_BASE}/analyses/${key}`);
       const { metadata, predictions: preds, pred_config, backtest_results: bt, backtest_config: btConfig } = res.data;
-
-      // Restore config from metadata
-      const sym = metadata.symbol || activeSymbol;
+      const sym = metadata.symbol || 'UNKNOWN';
       const per = metadata.period || '1y';
       const intv = metadata.interval || '1d';
-      setActiveSymbol(sym);
-      setPeriod(per);
-      setInterval(intv);
 
-      if (pred_config) {
-        setPredLen(pred_config.pred_len || 30);
-        setLookback(pred_config.lookback_limit || 256);
-      }
-      if (btConfig) {
-        setBtPredLen(btConfig.pred_len || 30);
-        setBtLookback(btConfig.lookback || 256);
-      }
-
-      // Fetch raw symbol data directly (NOT via loadSymbolData which would clear predictions)
       let rawData = [];
       try {
         const dataRes = await axios.get(`${API_BASE}/data`, { params: { symbol: sym, period: per, interval: intv } });
         rawData = dataRes.data;
-      } catch (dataErr) {
-        console.warn('Could not reload raw data:', dataErr);
-      }
-
-      // Set everything atomically — data first, then predictions/backtest
-      setData(rawData);
-      if (!activeTabs.includes(sym)) setActiveTabs(prev => [...prev, sym]);
+      } catch (e) { console.warn('Could not reload raw data:', e); }
 
       const loadedPreds = preds || {};
-      setPredictions(loadedPreds);
+      const metrics = rawData.length > 0 ? calcMetrics(loadedPreds, rawData) : {};
+      const firstValid = Object.keys(loadedPreds).find(k => !loadedPreds[k].error);
 
-      if (bt && Object.keys(bt).length > 0) {
-        setBacktestResultsAll(bt);
-      } else {
-        setBacktestResultsAll(null);
-      }
-
-      // Calculate metrics using the freshly loaded raw data
-      if (Object.keys(loadedPreds).length > 0 && rawData.length > 0) {
-        calculateSummaryMetrics(loadedPreds, rawData);
-        const firstValid = Object.keys(loadedPreds).find(k => !loadedPreds[k].error);
-        if (firstValid) setActiveModelTab(firstValid);
-      }
-
+      // Create a new session for the loaded analysis
+      const newId = addNewSession({
+        symbol: sym, period: per, interval: intv,
+        predLen: pred_config?.pred_len || 30,
+        lookback: pred_config?.lookback_limit || 256,
+        backtestPredLen: btConfig?.pred_len || 30,
+        backtestLookback: btConfig?.lookback || 256,
+        selectedModels: pred_config?.models || ['kronos-base'],
+        data: rawData,
+        predictions: loadedPreds,
+        backtestResultsAll: (bt && Object.keys(bt).length > 0) ? bt : null,
+        summaryMetrics: metrics,
+        activeModelTab: firstValid || null,
+      });
       setView('dashboard');
     } catch (err) {
       console.error('Error loading analysis:', err);
-      alert('Failed to load analysis: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setLoading(false);
-    }
+      alert('Failed to load: ' + (err.response?.data?.detail || err.message));
+    } finally { setLoading(false); }
   };
 
   const handleDeleteAnalysis = () => { fetchAnalyses(); };
 
-  const hasPredictions = predictions && Object.keys(predictions).length > 0;
-  const validModelKeys = hasPredictions ? Object.keys(predictions).filter(k => !predictions[k].error) : [];
-  const rawDataRows = data.slice(-5);
+  const hasPredictions = s.predictions && Object.keys(s.predictions).length > 0;
+  const validModelKeys = hasPredictions ? Object.keys(s.predictions).filter(k => !s.predictions[k].error) : [];
+
+  // Build sidebar session list
+  const sidebarSessions = sessionOrder.map(id => {
+    const sess = sessions[id];
+    if (!sess) return null;
+    const hasPred = sess.predictions && Object.keys(sess.predictions).length > 0;
+    const hasBt = sess.backtestResultsAll && Object.keys(sess.backtestResultsAll).length > 0;
+    return { id, symbol: sess.symbol, period: sess.period, interval: sess.interval, hasPredictions: hasPred, hasBacktest: hasBt };
+  }).filter(Boolean);
 
   return (
     <div className="flex h-screen bg-[#0a0a0a] text-white overflow-hidden font-sans">
-      <Sidebar activeSymbol={activeSymbol} onSymbolChange={setActiveSymbol} setView={setView}
-        currentView={view} activeTabs={activeTabs} onCloseTab={closeTab} />
+      <Sidebar
+        sessions={sidebarSessions}
+        activeSessionId={activeSessionId}
+        onSwitchSession={switchSession}
+        onCloseSession={closeSession}
+        onAddSession={() => addNewSession()}
+        setView={setView}
+        currentView={view}
+      />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 glass flex items-center justify-between px-6 z-10 border-b border-white/5">
@@ -267,31 +293,31 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Stock Symbol</label>
-                    <input type="text" value={activeSymbol} onChange={e => setActiveSymbol(e.target.value.toUpperCase())}
+                    <input type="text" value={s.symbol} onChange={e => updateSession({ symbol: e.target.value.toUpperCase() })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-accent/50 transition-all font-bold"
                       placeholder="e.g. RELIANCE.NS" />
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Historical Period</label>
-                    <select value={period} onChange={e => setPeriod(e.target.value)}
+                    <select value={s.period} onChange={e => updateSession({ period: e.target.value })}
                       className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-accent/50 transition-all cursor-pointer">
                       {['1mo','3mo','6mo','1y','2y','5y'].map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Interval</label>
-                    <select value={interval} onChange={e => setInterval(e.target.value)}
+                    <select value={s.interval} onChange={e => updateSession({ interval: e.target.value })}
                       className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-accent/50 transition-all cursor-pointer">
                       {['1d','1h','30m'].map(i => <option key={i} value={i}>{i}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2 lg:col-span-1">
-                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Prediction Length ({predLen}d)</label>
-                    <input type="range" min="5" max="60" value={predLen} onChange={e => setPredLen(parseInt(e.target.value))} className="w-full accent-accent cursor-pointer" />
+                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Prediction Length ({s.predLen}d)</label>
+                    <input type="range" min="5" max="60" value={s.predLen} onChange={e => updateSession({ predLen: parseInt(e.target.value) })} className="w-full accent-accent cursor-pointer" />
                   </div>
                   <div className="space-y-2 lg:col-span-1">
-                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Lookback ({lookback})</label>
-                    <input type="range" min="100" max="512" value={lookback} onChange={e => setLookback(parseInt(e.target.value))} className="w-full accent-accent cursor-pointer" />
+                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Lookback ({s.lookback})</label>
+                    <input type="range" min="100" max="512" value={s.lookback} onChange={e => updateSession({ lookback: parseInt(e.target.value) })} className="w-full accent-accent cursor-pointer" />
                   </div>
                 </div>
 
@@ -302,9 +328,12 @@ function App() {
                       <div className="flex gap-2">
                         {Object.keys(models).map(key => (
                           <button key={key}
-                            onClick={() => setSelectedModels(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])}
+                            onClick={() => {
+                              const cur = s.selectedModels;
+                              updateSession({ selectedModels: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key] });
+                            }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                              selectedModels.includes(key) ? 'bg-accent border-accent text-white' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'}`}>
+                              s.selectedModels.includes(key) ? 'bg-accent border-accent text-white' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'}`}>
                             {models[key].name}
                           </button>
                         ))}
@@ -312,11 +341,11 @@ function App() {
                     </div>
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={() => loadSymbolData()} disabled={loading || !activeSymbol}
+                    <button onClick={loadSymbolData} disabled={loading || !s.symbol}
                       className="h-11 bg-white/5 hover:bg-white/10 text-white font-bold px-6 rounded-xl border border-white/10 transition-all flex items-center gap-2">
                       <Database size={18} /> Load Data
                     </button>
-                    <button onClick={runPredictions} disabled={loading || selectedModels.length === 0 || data.length === 0}
+                    <button onClick={runPredictions} disabled={loading || s.selectedModels.length === 0 || s.data.length === 0}
                       className="h-11 bg-accent text-white font-bold px-8 rounded-xl hover:bg-accent/90 disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-accent/20">
                       {loading ? <RefreshCw className="animate-spin" size={18} /> : <TrendingUp size={18} />}
                       Run Prediction
@@ -326,25 +355,25 @@ function App() {
               </div>
 
               {/* Raw Data Table */}
-              {data.length > 0 && (
+              {s.data.length > 0 && (
                 <div className="glass rounded-2xl overflow-hidden border border-white/5">
-                  <button onClick={() => setShowRawData(!showRawData)}
+                  <button onClick={() => updateSession({ showRawData: !s.showRawData })}
                     className="w-full px-6 py-4 flex items-center justify-between bg-white/5 hover:bg-white/[0.07] transition-colors">
                     <div className="flex items-center gap-2">
                       <TableIcon size={16} className="text-accent" />
                       <span className="font-bold text-sm uppercase tracking-wider text-white/80">Raw Data</span>
-                      <span className="text-[10px] text-white/30 ml-2">{data.length} rows loaded</span>
+                      <span className="text-[10px] text-white/30 ml-2">{s.data.length} rows loaded</span>
                     </div>
-                    <span className="text-xs text-white/30">{showRawData ? '▲ Hide' : '▼ Show last 5 rows'}</span>
+                    <span className="text-xs text-white/30">{s.showRawData ? '▲ Hide' : '▼ Show last 5 rows'}</span>
                   </button>
-                  {showRawData && (
+                  {s.showRawData && (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead><tr className="bg-white/5 text-[10px] font-bold text-white/40 uppercase tracking-widest border-b border-white/5">
                           <th className="px-6 py-3">Date</th><th className="px-6 py-3">Open</th><th className="px-6 py-3">High</th>
                           <th className="px-6 py-3">Low</th><th className="px-6 py-3">Close</th><th className="px-6 py-3">Volume</th>
                         </tr></thead>
-                        <tbody className="text-sm">{rawDataRows.map((r, i) => (
+                        <tbody className="text-sm">{s.data.slice(-5).map((r, i) => (
                           <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
                             <td className="px-6 py-2 text-white/60">{new Date(r.datetime).toLocaleDateString()}</td>
                             <td className="px-6 py-2 font-mono text-white/80">{r.open?.toFixed(2)}</td>
@@ -362,64 +391,53 @@ function App() {
               {/* Prediction Results */}
               {hasPredictions ? (
                 <>
-                  {/* Model Tabs */}
                   <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
                     <div className="flex gap-2 flex-1 overflow-x-auto">
                       {validModelKeys.map(modelKey => (
-                        <button key={modelKey} onClick={() => setActiveModelTab(modelKey)}
+                        <button key={modelKey} onClick={() => updateSession({ activeModelTab: modelKey })}
                           className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${
-                            activeModelTab === modelKey ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'}`}>
+                            s.activeModelTab === modelKey ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'}`}>
                           {models[modelKey]?.name || modelKey}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Per-Model Content */}
-                  {activeModelTab && predictions[activeModelTab] && !predictions[activeModelTab].error && (
+                  {s.activeModelTab && s.predictions[s.activeModelTab] && !s.predictions[s.activeModelTab].error && (
                     <>
-                      {/* Model info */}
                       <div className="glass rounded-xl p-4 border border-white/5 flex items-center gap-4">
                         <div className="flex-1">
-                          <span className="text-sm font-bold text-white">{predictions[activeModelTab].config?.name || activeModelTab}</span>
+                          <span className="text-sm font-bold text-white">{s.predictions[s.activeModelTab].config?.name || s.activeModelTab}</span>
                           <span className="text-xs text-white/30 ml-3">
-                            Context: {predictions[activeModelTab].config?.context_length} | 
-                            Params: {predictions[activeModelTab].config?.params} | 
-                            Lookback: {predictions[activeModelTab].lookback_used} pts
+                            Context: {s.predictions[s.activeModelTab].config?.context_length} | 
+                            Params: {s.predictions[s.activeModelTab].config?.params} | 
+                            Lookback: {s.predictions[s.activeModelTab].lookback_used} pts
                           </span>
                         </div>
-                        <span className="text-xs text-white/20">{predictions[activeModelTab].config?.description}</span>
+                        <span className="text-xs text-white/20">{s.predictions[s.activeModelTab].config?.description}</span>
                       </div>
-
-                      {/* Metrics */}
-                      {summaryMetrics[activeModelTab] && <Metrics metrics={summaryMetrics[activeModelTab]} />}
-
-                      {/* Chart (single model view) */}
-                      <MainChart data={data} predictions={predictions} activeModelKey={activeModelTab} mode="single" />
-
-                      {/* Prediction Table */}
-                      <PredictionTable data={predictions[activeModelTab].pred_df} modelName={models[activeModelTab]?.name} />
+                      {s.summaryMetrics[s.activeModelTab] && <Metrics metrics={s.summaryMetrics[s.activeModelTab]} />}
+                      <MainChart data={s.data} predictions={s.predictions} activeModelKey={s.activeModelTab} mode="single" />
+                      <PredictionTable data={s.predictions[s.activeModelTab].pred_df} modelName={models[s.activeModelTab]?.name} />
                     </>
                   )}
 
-                  {/* Model Comparison (when >1 model) */}
-                  <ModelComparison predictions={predictions} data={data} models={models} backtestResultsAll={backtestResultsAll} />
+                  <ModelComparison predictions={s.predictions} data={s.data} models={models} backtestResultsAll={s.backtestResultsAll} />
 
-                  {/* Backtest Section */}
                   <BacktestSection
-                    backtestResultsAll={backtestResultsAll}
+                    backtestResultsAll={s.backtestResultsAll}
                     models={models}
-                    selectedModels={selectedModels}
+                    selectedModels={s.selectedModels}
                     onRunBacktest={runBacktestAll}
                     loading={loading}
-                    backtestPredLen={backtestPredLen}
-                    setBtPredLen={setBtPredLen}
-                    backtestLookback={backtestLookback}
-                    setBtLookback={setBtLookback}
+                    backtestPredLen={s.backtestPredLen}
+                    setBtPredLen={v => updateSession({ backtestPredLen: v })}
+                    backtestLookback={s.backtestLookback}
+                    setBtLookback={v => updateSession({ backtestLookback: v })}
                   />
                 </>
               ) : (
-                <MainChart data={data} />
+                <MainChart data={s.data} />
               )}
             </div>
           ) : (

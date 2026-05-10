@@ -1,22 +1,16 @@
 import React, { useState } from 'react';
 import { 
-  Search, 
-  History, 
-  LayoutDashboard, 
-  TrendingUp, 
-  Star, 
-  Clock,
-  Plus,
-  X
+  Search, History, LayoutDashboard, TrendingUp, Clock, Plus, X,
+  FlaskConical, BarChart2
 } from 'lucide-react';
 
-const Sidebar = ({ activeSymbol, onSymbolChange, setView, currentView, activeTabs, onCloseTab }) => {
+const Sidebar = ({ sessions, activeSessionId, onSwitchSession, onCloseSession, onAddSession, setView, currentView }) => {
   const [search, setSearch] = useState('');
 
   const handleSearch = (e) => {
     e.preventDefault();
     if (search.trim()) {
-      onSymbolChange(search.toUpperCase());
+      onAddSession?.({ symbol: search.toUpperCase() });
       setSearch('');
     }
   };
@@ -32,69 +26,74 @@ const Sidebar = ({ activeSymbol, onSymbolChange, setView, currentView, activeTab
         </div>
 
         <form onSubmit={handleSearch} className="relative mb-8">
-          <input
-            type="text"
-            placeholder="Search symbol..."
-            value={search}
+          <input type="text" placeholder="Quick add symbol..." value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-accent/50 transition-all"
-          />
+            className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-accent/50 transition-all" />
           <Search className="absolute left-3 top-2.5 text-white/30" size={16} />
         </form>
 
         <nav className="space-y-1">
-          <button
-            onClick={() => setView('dashboard')}
+          <button onClick={() => setView('dashboard')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-              currentView === 'dashboard' ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-white/50 hover:bg-white/5 hover:text-white'
-            }`}
-          >
-            <LayoutDashboard size={18} />
-            Dashboard
+              currentView === 'dashboard' ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-white/50 hover:bg-white/5 hover:text-white'}`}>
+            <LayoutDashboard size={18} /> Dashboard
           </button>
-          <button
-            onClick={() => setView('history')}
+          <button onClick={() => setView('history')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-              currentView === 'history' ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-white/50 hover:bg-white/5 hover:text-white'
-            }`}
-          >
-            <History size={18} />
-            History
+              currentView === 'history' ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-white/50 hover:bg-white/5 hover:text-white'}`}>
+            <History size={18} /> Saved Analyses
           </button>
         </nav>
 
         <div className="mt-10">
           <div className="flex items-center justify-between mb-4 px-2">
             <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest">Active Research</span>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-white/20 font-bold bg-white/5 px-1.5 py-0.5 rounded">{activeTabs.length}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-white/20 font-bold bg-white/5 px-1.5 py-0.5 rounded">{sessions?.length || 0}</span>
+              <button onClick={() => onAddSession?.()} title="New research session"
+                className="w-6 h-6 flex items-center justify-center bg-accent/20 hover:bg-accent/40 text-accent rounded-lg transition-all">
+                <Plus size={14} />
+              </button>
             </div>
           </div>
-          <div className="space-y-1 max-h-[300px] overflow-y-auto scrollbar-hide">
-            {activeTabs.length > 0 ? (
-              activeTabs.map(symbol => (
-                <div 
-                  key={symbol}
-                  className={`group w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                    activeSymbol === symbol ? 'text-accent bg-accent/10' : 'text-white/40 hover:text-white hover:bg-white/5'
-                  }`}
-                  onClick={() => onSymbolChange(symbol)}
-                >
-                  <span className="truncate mr-2">{symbol}</span>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTab(symbol);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded transition-all"
-                  >
-                    <X size={12} />
+          <div className="space-y-1 max-h-[350px] overflow-y-auto scrollbar-hide">
+            {sessions && sessions.length > 0 ? (
+              sessions.map(sess => (
+                <div key={sess.id}
+                  className={`group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all cursor-pointer ${
+                    activeSessionId === sess.id ? 'bg-accent/10 border border-accent/20' : 'hover:bg-white/5 border border-transparent'}`}
+                  onClick={() => onSwitchSession(sess.id)}>
+                  <div className="flex flex-col min-w-0 flex-1 mr-2">
+                    <span className={`font-bold truncate ${activeSessionId === sess.id ? 'text-accent' : 'text-white/60'}`}>
+                      {sess.symbol || 'New Session'}
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[9px] text-white/20 bg-white/5 px-1 rounded">{sess.period}</span>
+                      <span className="text-[9px] text-white/20 bg-white/5 px-1 rounded">{sess.interval}</span>
+                      {sess.hasPredictions && (
+                        <span className="text-[9px] text-emerald-400/60" title="Has predictions">
+                          <BarChart2 size={9} />
+                        </span>
+                      )}
+                      {sess.hasBacktest && (
+                        <span className="text-[9px] text-orange-400/60" title="Has backtest">
+                          <FlaskConical size={9} />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); onCloseSession(sess.id); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded transition-all flex-shrink-0">
+                    <X size={12} className="text-white/40" />
                   </button>
                 </div>
               ))
             ) : (
               <div className="px-4 py-8 text-center border border-dashed border-white/5 rounded-xl">
-                <p className="text-[10px] text-white/20 italic">No symbols loaded</p>
+                <p className="text-[10px] text-white/20 italic">No active research</p>
+                <button onClick={() => onAddSession?.()} className="mt-2 text-[10px] text-accent hover:underline">
+                  + Start new
+                </button>
               </div>
             )}
           </div>
@@ -108,7 +107,7 @@ const Sidebar = ({ activeSymbol, onSymbolChange, setView, currentView, activeTab
             <span className="text-[11px] font-bold text-white/60">Session Info</span>
           </div>
           <p className="text-[10px] text-white/30 leading-relaxed">
-            Symbols added here persist during your current research session.
+            Each tab retains its analysis. Use + to add sessions. Load saved analyses from History.
           </p>
         </div>
       </div>
