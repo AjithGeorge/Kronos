@@ -78,14 +78,16 @@ function App() {
     } finally { setLoading(false); }
   };
 
-  const calculateSummaryMetrics = (preds) => {
-    if (!data || data.length === 0 || !preds) return {};
+  const calculateSummaryMetrics = (preds, histData) => {
+    const srcData = histData || data;
+    if (!srcData || srcData.length === 0 || !preds) return {};
     const results = {};
-    const lastHist = data[data.length - 1];
+    const lastHist = srcData[srcData.length - 1];
     Object.keys(preds).forEach(modelKey => {
       const pred = preds[modelKey];
       if (pred.error) return;
       const predDf = pred.pred_df;
+      if (!predDf || predDf.length === 0) return;
       const lastPred = predDf[predDf.length - 1];
       const futurePrice = lastPred.close;
       const lastPrice = lastHist.close;
@@ -97,7 +99,7 @@ function App() {
       results[modelKey] = {
         lastPrice, futurePrice, changePct, minPred, maxPred,
         predRange: maxPred - minPred, avgPredVol,
-        volChangePct: ((avgPredVol - lastVol) / lastVol) * 100,
+        volChangePct: lastVol ? ((avgPredVol - lastVol) / lastVol) * 100 : 0,
         trend: changePct > 0 ? 'Bullish' : changePct < 0 ? 'Bearish' : 'Neutral',
         highDelta: ((maxPred - lastPrice) / lastPrice) * 100,
         lowDelta: ((minPred - lastPrice) / lastPrice) * 100,
@@ -154,30 +156,78 @@ function App() {
     try {
       await axios.post(`${API_BASE}/analyses`, {
         symbol: activeSymbol, period, interval,
-        pred_config: { models: selectedModels, pred_len: predLen, lookback_limit: lookback },
+        pred_config: { symbol: activeSymbol, period, interval, models: selectedModels, pred_len: predLen, lookback_limit: lookback },
         predictions,
         backtest_results: hasBt ? backtestResultsAll : null,
-        backtest_config: hasBt ? { lookback: backtestLookback, pred_len: backtestPredLen } : null
+        backtest_config: hasBt ? { symbol: activeSymbol, period, interval, models: selectedModels, lookback: backtestLookback, pred_len: backtestPredLen } : null
       });
       fetchAnalyses();
       alert('Analysis saved successfully!');
-    } catch (err) { console.error('Error saving analysis:', err); }
+    } catch (err) {
+      console.error('Error saving analysis:', err);
+      alert('Failed to save analysis: ' + (err.response?.data?.detail || err.message));
+    }
   };
 
   const loadAnalysis = async (key) => {
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/analyses/${key}`);
-      const { metadata, predictions: preds, backtest_results: bt } = res.data;
-      setActiveSymbol(metadata.symbol);
-      setPredictions(preds || {});
-      calculateSummaryMetrics(preds);
-      if (bt && Object.keys(bt).length > 0) setBacktestResultsAll(bt);
-      else setBacktestResultsAll(null);
-      await loadSymbolData(metadata.symbol);
+      const { metadata, predictions: preds, pred_config, backtest_results: bt, backtest_config: btConfig } = res.data;
+
+      // Restore config from metadata
+      const sym = metadata.symbol || activeSymbol;
+      const per = metadata.period || '1y';
+      const intv = metadata.interval || '1d';
+      setActiveSymbol(sym);
+      setPeriod(per);
+      setInterval(intv);
+
+      if (pred_config) {
+        setPredLen(pred_config.pred_len || 30);
+        setLookback(pred_config.lookback_limit || 256);
+      }
+      if (btConfig) {
+        setBtPredLen(btConfig.pred_len || 30);
+        setBtLookback(btConfig.lookback || 256);
+      }
+
+      // Fetch raw symbol data directly (NOT via loadSymbolData which would clear predictions)
+      let rawData = [];
+      try {
+        const dataRes = await axios.get(`${API_BASE}/data`, { params: { symbol: sym, period: per, interval: intv } });
+        rawData = dataRes.data;
+      } catch (dataErr) {
+        console.warn('Could not reload raw data:', dataErr);
+      }
+
+      // Set everything atomically — data first, then predictions/backtest
+      setData(rawData);
+      if (!activeTabs.includes(sym)) setActiveTabs(prev => [...prev, sym]);
+
+      const loadedPreds = preds || {};
+      setPredictions(loadedPreds);
+
+      if (bt && Object.keys(bt).length > 0) {
+        setBacktestResultsAll(bt);
+      } else {
+        setBacktestResultsAll(null);
+      }
+
+      // Calculate metrics using the freshly loaded raw data
+      if (Object.keys(loadedPreds).length > 0 && rawData.length > 0) {
+        calculateSummaryMetrics(loadedPreds, rawData);
+        const firstValid = Object.keys(loadedPreds).find(k => !loadedPreds[k].error);
+        if (firstValid) setActiveModelTab(firstValid);
+      }
+
       setView('dashboard');
-    } catch (err) { console.error('Error loading analysis:', err); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error('Error loading analysis:', err);
+      alert('Failed to load analysis: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteAnalysis = () => { fetchAnalyses(); };

@@ -149,29 +149,43 @@ async def get_analysis(key: str):
     if not analysis or not analysis["metadata"]:
         raise HTTPException(status_code=404, detail="Analysis not found")
     
-    # Serialize dataframes in predictions
+    # Serialize dataframes in predictions (handles Streamlit-saved DataFrame objects)
     if analysis["predictions"]:
-        for model_key in analysis["predictions"]:
+        for model_key in list(analysis["predictions"].keys()):
             pred = analysis["predictions"][model_key]
-            if "pred_df" in pred and isinstance(pred["pred_df"], pd.DataFrame):
-                pred["pred_df"] = pred["pred_df"].reset_index().to_dict(orient="records")
+            if "pred_df" in pred:
+                if isinstance(pred["pred_df"], pd.DataFrame):
+                    pdf = pred["pred_df"].copy()
+                    if pdf.index.name != "datetime":
+                        pdf.index.name = "datetime"
+                    pred["pred_df"] = pdf.reset_index().to_dict(orient="records")
+                # Ensure datetime strings are present (for dict/list format too)
 
     # Serialize backtest dataframes
     if analysis["backtest_results"]:
-        for model_key in analysis["backtest_results"]:
+        for model_key in list(analysis["backtest_results"].keys()):
             bt = analysis["backtest_results"][model_key]
+            if "error" in bt:
+                continue
+            # Handle pred_df
             if "pred_df" in bt and isinstance(bt["pred_df"], pd.DataFrame):
-                bt["pred_df"] = bt["pred_df"].reset_index().to_dict(orient="records")
+                pdf = bt["pred_df"].copy()
+                if pdf.index.name != "datetime":
+                    pdf.index.name = "datetime"
+                bt["pred_df"] = pdf.reset_index().to_dict(orient="records")
+            # Handle actual_df (API-saved) or test_df (Streamlit-saved)
+            if "test_df" in bt and "actual_df" not in bt:
+                bt["actual_df"] = bt.pop("test_df")
             if "actual_df" in bt and isinstance(bt["actual_df"], pd.DataFrame):
-                bt["actual_df"] = bt["actual_df"].reset_index().to_dict(orient="records")
+                adf = bt["actual_df"].copy()
+                if adf.index.name != "datetime":
+                    adf.index.name = "datetime"
+                bt["actual_df"] = adf.reset_index().to_dict(orient="records")
                 
     return analysis
 
 @app.post("/api/analyses")
-async def save_analysis(payload: Dict[str, Any]):
-    # This endpoint expects a complex payload matching storage_manager.save_analysis
-    # We'll need to reconstruct dataframes from the incoming JSON if necessary,
-    # but the storage manager handles pickles, so we can pass dicts if they are serializable.
+async def save_analysis(payload: Dict[str, Any] = Body(...)):
     try:
         key = storage_service.save_analysis(
             symbol=payload["symbol"],
