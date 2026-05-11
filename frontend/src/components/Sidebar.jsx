@@ -25,13 +25,6 @@ const Sidebar = ({ sessions, activeSessionId, onSwitchSession, onCloseSession, o
           <span className="font-bold text-lg tracking-tight">KRONOS <span className="text-white/30">v2.0</span></span>
         </div>
 
-        <form onSubmit={handleSearch} className="relative mb-8">
-          <input type="text" placeholder="Quick add symbol..." value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-accent/50 transition-all" />
-          <Search className="absolute left-3 top-2.5 text-white/30" size={16} />
-        </form>
-
         <nav className="space-y-1">
           <button onClick={() => setView('dashboard')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${

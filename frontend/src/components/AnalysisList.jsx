@@ -96,7 +96,7 @@ const AnalysisList = ({ analyses, onLoad, onDelete, onRefresh }) => {
             </div>
             <div className="flex items-center gap-3">
               <button onClick={() => onLoad(analysis.key)}
-                className="flex-1 bg-white/5 hover:bg-accent hover:text-white border border-white/10 rounded-xl py-3 text-sm font-bold transition-all flex items-center justify-center gap-2">
+                className="flex-1 bg-gradient-to-r from-accent to-purple-500 hover:from-accent/90 hover:to-purple-500/90 text-white border border-white/10 rounded-xl py-3 text-sm font-bold backdrop-blur-md transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent/20">
                 <ExternalLink size={16} /> Load Analysis
               </button>
               <button onClick={() => handleDelete(analysis.key)} disabled={deleting === analysis.key}

@@ -21,11 +21,11 @@ const defaultSession = (overrides = {}) => ({
   symbol: 'RECLTD.NS',
   period: '1y',
   interval: '1d',
-  predLen: 30,
-  lookback: 256,
-  backtestPredLen: 30,
-  backtestLookback: 256,
-  selectedModels: ['kronos-base'],
+  predLen: 45,
+  lookback: 400,
+  backtestPredLen: 45,
+  backtestLookback: 400,
+  selectedModels: ['kronos-base','kronos-small','kronos-mini'],
   data: [],
   predictions: {},
   backtestResultsAll: null,
@@ -223,10 +223,10 @@ function App() {
       // Create a new session for the loaded analysis
       const newId = addNewSession({
         symbol: sym, period: per, interval: intv,
-        predLen: pred_config?.pred_len || 30,
-        lookback: pred_config?.lookback_limit || 256,
-        backtestPredLen: btConfig?.pred_len || 30,
-        backtestLookback: btConfig?.lookback || 256,
+        predLen: pred_config?.pred_len || 45,
+        lookback: pred_config?.lookback_limit || 400,
+        backtestPredLen: btConfig?.pred_len || 45,
+        backtestLookback: btConfig?.lookback || 400,
         selectedModels: pred_config?.models || ['kronos-base'],
         data: rawData,
         predictions: loadedPreds,
@@ -274,12 +274,8 @@ function App() {
             <h1 className="text-xl font-bold tracking-tight">Kronos <span className="text-accent">Stock Predictor</span></h1>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center bg-white/5 rounded-lg px-3 py-1.5 border border-white/10">
-              <Cpu size={16} className="text-accent mr-2" />
-              <span className="text-xs font-bold uppercase tracking-wider text-white/60">Device: CUDA</span>
-            </div>
             <button onClick={saveAnalysis} disabled={!hasPredictions}
-              className="flex items-center gap-2 bg-accent hover:bg-accent/90 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg transition-all shadow-lg shadow-accent/20">
+              className="flex items-center gap-2 bg-white/5 hover:bg-accent/20 border border-white/10 hover:border-accent/50 text-white hover:text-accent disabled:opacity-50 px-4 py-2 rounded-xl backdrop-blur-md transition-all shadow-lg shadow-black/20">
               <Save size={16} /><span className="text-sm font-bold">Save Analysis</span>
             </button>
           </div>
@@ -342,11 +338,11 @@ function App() {
                   </div>
                   <div className="flex gap-3">
                     <button onClick={loadSymbolData} disabled={loading || !s.symbol}
-                      className="h-11 bg-white/5 hover:bg-white/10 text-white font-bold px-6 rounded-xl border border-white/10 transition-all flex items-center gap-2">
+                      className="h-11 bg-white/5 hover:bg-white/10 text-white font-bold px-6 rounded-xl border border-white/10 backdrop-blur-md transition-all flex items-center gap-2 shadow-lg shadow-black/20">
                       <Database size={18} /> Load Data
                     </button>
                     <button onClick={runPredictions} disabled={loading || s.selectedModels.length === 0 || s.data.length === 0}
-                      className="h-11 bg-accent text-white font-bold px-8 rounded-xl hover:bg-accent/90 disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-accent/20">
+                      className="h-11 bg-gradient-to-r from-accent to-purple-500 hover:from-accent/90 hover:to-purple-500/90 text-white font-bold px-8 rounded-xl disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-accent/20 border border-white/10 backdrop-blur-md">
                       {loading ? <RefreshCw className="animate-spin" size={18} /> : <TrendingUp size={18} />}
                       Run Prediction
                     </button>

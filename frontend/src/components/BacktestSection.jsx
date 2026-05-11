@@ -78,7 +78,7 @@ const BacktestSection = ({ backtestResultsAll, models, selectedModels, onRunBack
           </div>
           <div className="flex items-end">
             <button onClick={onRunBacktest} disabled={loading || selectedModels.length === 0}
-              className="w-full h-11 bg-orange-500 text-white font-bold px-6 rounded-xl hover:bg-orange-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">
+              className="w-full h-11 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-500/90 hover:to-red-500/90 text-white font-bold px-6 rounded-xl disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20 border border-white/10 backdrop-blur-md">
               <FlaskConical size={18} /> Run Backtest for All Models
             </button>
           </div>
