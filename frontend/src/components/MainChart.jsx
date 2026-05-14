@@ -90,11 +90,16 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
       });
     });
 
+    const firstPredDf = modelsToShow.length > 0 ? modelsToShow[0][1]?.pred_df : null;
+    const separatorDate = (firstPredDf && firstPredDf.length > 0) 
+      ? firstPredDf[0].datetime 
+      : histData[histData.length - 1].datetime;
+
     // Separator line
     layout.shapes = [{
       type: 'line',
-      x0: histData[histData.length - 1].datetime,
-      x1: histData[histData.length - 1].datetime,
+      x0: separatorDate,
+      x1: separatorDate,
       y0: 0, y1: 1, yref: 'paper',
       line: { color: 'white', width: 2, dash: 'dash' }
     }];

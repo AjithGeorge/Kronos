@@ -46,6 +46,7 @@ class PredictRequest(BaseModel):
     models: List[str]
     pred_len: int = 40
     lookback_limit: int = 400
+    start_offset: int = 0
 
 class BacktestRequest(BaseModel):
     symbol: str
@@ -68,6 +69,9 @@ async def predict(request: PredictRequest):
     df, error = data_service.load_data(request.symbol, request.period, request.interval)
     if error:
         raise HTTPException(status_code=400, detail=error)
+    
+    if request.start_offset > 0:
+        df = df.iloc[:-request.start_offset].copy()
     
     results = prediction_service.predict_parallel(
         request.models, df, request.pred_len, request.lookback_limit

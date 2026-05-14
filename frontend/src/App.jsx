@@ -23,6 +23,7 @@ const defaultSession = (overrides = {}) => ({
   interval: '1d',
   predLen: 45,
   lookback: 400,
+  startOffset: 0,
   backtestPredLen: 45,
   backtestLookback: 400,
   selectedModels: ['kronos-base','kronos-small','kronos-mini'],
@@ -155,7 +156,8 @@ function App() {
     try {
       const res = await axios.post(`${API_BASE}/predict`, {
         symbol: s.symbol, period: s.period, interval: s.interval,
-        models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback
+        models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback,
+        start_offset: s.startOffset
       });
       const metrics = calcMetrics(res.data, s.data);
       const firstValid = Object.keys(res.data).find(k => !res.data[k].error);
@@ -188,7 +190,7 @@ function App() {
     try {
       await axios.post(`${API_BASE}/analyses`, {
         symbol: s.symbol, period: s.period, interval: s.interval,
-        pred_config: { symbol: s.symbol, period: s.period, interval: s.interval, models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback },
+        pred_config: { symbol: s.symbol, period: s.period, interval: s.interval, models: s.selectedModels, pred_len: s.predLen, lookback_limit: s.lookback, start_offset: s.startOffset },
         predictions: s.predictions,
         backtest_results: hasBt ? s.backtestResultsAll : null,
         backtest_config: hasBt ? { symbol: s.symbol, period: s.period, interval: s.interval, models: s.selectedModels, lookback: s.backtestLookback, pred_len: s.backtestPredLen } : null
@@ -225,6 +227,7 @@ function App() {
         symbol: sym, period: per, interval: intv,
         predLen: pred_config?.pred_len || 45,
         lookback: pred_config?.lookback_limit || 400,
+        startOffset: pred_config?.start_offset || 0,
         backtestPredLen: btConfig?.pred_len || 45,
         backtestLookback: btConfig?.lookback || 400,
         selectedModels: pred_config?.models || ['kronos-base'],
@@ -286,7 +289,7 @@ function App() {
             <div className="max-w-[1400px] mx-auto space-y-6 pb-20">
               {/* Configuration Bar */}
               <div className="glass rounded-2xl p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Stock Symbol</label>
                     <input type="text" value={s.symbol} onChange={e => updateSession({ symbol: e.target.value.toUpperCase() })}
@@ -314,6 +317,10 @@ function App() {
                   <div className="space-y-2 lg:col-span-1">
                     <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Lookback ({s.lookback})</label>
                     <input type="range" min="100" max="512" value={s.lookback} onChange={e => updateSession({ lookback: parseInt(e.target.value) })} className="w-full accent-accent cursor-pointer" />
+                  </div>
+                  <div className="space-y-2 lg:col-span-1">
+                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wider">Start Offset ({s.startOffset}d)</label>
+                    <input type="range" min="0" max="100" value={s.startOffset} onChange={e => updateSession({ startOffset: parseInt(e.target.value) })} className="w-full accent-accent cursor-pointer" />
                   </div>
                 </div>
 
