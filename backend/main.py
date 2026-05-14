@@ -74,7 +74,7 @@ async def predict(request: PredictRequest):
         df = df.iloc[:-request.start_offset].copy()
     
     results = prediction_service.predict_parallel(
-        request.models, df, request.pred_len, request.lookback_limit
+        request.models, df, request.pred_len, request.lookback_limit, request.interval
     )
     
     # Prepare results for JSON serialization

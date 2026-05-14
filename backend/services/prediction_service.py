@@ -72,7 +72,7 @@ class PredictionService:
         self.loaded_models[model_key] = (predictor, config)
         return predictor, config
 
-    def predict_single(self, model_key: str, df: pd.DataFrame, pred_len: int, lookback_limit: int):
+    def predict_single(self, model_key: str, df: pd.DataFrame, pred_len: int, lookback_limit: int, interval: str = "1d"):
         predictor, config = self.get_model(model_key)
         
         if predictor is None:
@@ -84,14 +84,53 @@ class PredictionService:
         x_df = df.tail(model_lookback)[["open", "high", "low", "close", "volume", "amount"]]
         x_timestamp = df["datetime"].tail(model_lookback)
 
-        # Generate future timestamps (Business days)
+        # Generate future timestamps dynamically by inferring market hours from historical data
         last_date = df["datetime"].max()
-        y_timestamp = pd.date_range(
-            start=last_date + pd.Timedelta(days=1),
-            periods=pred_len,
-            freq="B",
-        )
-        y_timestamp = pd.Series(y_timestamp)
+        valid_times = sorted(list(set(df["datetime"].dt.time)))
+        valid_days = set(df["datetime"].dt.dayofweek)
+
+        future_ts = []
+        curr_date = last_date.normalize()
+        max_days = pred_len * 10
+        days_checked = 0
+
+        while len(future_ts) < pred_len and days_checked < max_days:
+            if curr_date.dayofweek in valid_days:
+                for t in valid_times:
+                    try:
+                        ts = pd.Timestamp(
+                            year=curr_date.year, 
+                            month=curr_date.month, 
+                            day=curr_date.day, 
+                            hour=t.hour, 
+                            minute=t.minute,
+                            second=t.second,
+                            tz=last_date.tz
+                        )
+                        if ts > last_date:
+                            future_ts.append(ts)
+                            if len(future_ts) == pred_len:
+                                break
+                    except Exception:
+                        pass
+            
+            if len(future_ts) == pred_len:
+                break
+                
+            curr_date += pd.Timedelta(days=1)
+            days_checked += 1
+
+        # Fallback if inference failed to generate enough points
+        if len(future_ts) < pred_len:
+            remaining = pred_len - len(future_ts)
+            fallback_ts = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=remaining, 
+                freq="B"
+            )
+            future_ts.extend(list(fallback_ts))
+
+        y_timestamp = pd.Series(future_ts)
 
         pred_df = predictor.predict(
             df=x_df,
@@ -116,7 +155,7 @@ class PredictionService:
             "y_timestamp": y_timestamp
         }
 
-    def predict_parallel(self, model_keys: List[str], df: pd.DataFrame, pred_len: int, lookback_limit: int):
+    def predict_parallel(self, model_keys: List[str], df: pd.DataFrame, pred_len: int, lookback_limit: int, interval: str = "1d"):
         """Run multiple models in parallel using threads."""
         results = {}
         
@@ -124,7 +163,7 @@ class PredictionService:
         # and we avoid the overhead of moving models across processes.
         with ThreadPoolExecutor(max_workers=len(model_keys)) as executor:
             future_to_model = {
-                executor.submit(self.predict_single, m, df, pred_len, lookback_limit): m 
+                executor.submit(self.predict_single, m, df, pred_len, lookback_limit, interval): m 
                 for m in model_keys
             }
             
