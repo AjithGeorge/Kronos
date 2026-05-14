@@ -44,24 +44,24 @@ class PredictRequest(BaseModel):
     period: str
     interval: str
     models: List[str]
-    pred_len: int = 30
-    lookback_limit: int = 256
+    pred_len: int = 40
+    lookback_limit: int = 400
 
 class BacktestRequest(BaseModel):
     symbol: str
     period: str
     interval: str
     model_key: str
-    lookback: int = 256
-    pred_len: int = 30
+    lookback: int = 400
+    pred_len: int = 40
 
 class BacktestAllRequest(BaseModel):
     symbol: str
     period: str
     interval: str
     models: List[str]
-    backtest_pred_len: int = 30
-    backtest_lookback: int = 256
+    backtest_pred_len: int = 40
+    backtest_lookback: int = 400
 
 @app.post("/api/predict")
 async def predict(request: PredictRequest):
