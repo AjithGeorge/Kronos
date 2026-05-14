@@ -26,7 +26,7 @@ const defaultSession = (overrides = {}) => ({
   startOffset: 0,
   backtestPredLen: 45,
   backtestLookback: 400,
-  selectedModels: ['kronos-base','kronos-small','kronos-mini'],
+  selectedModels: ['kronos-base'],
   data: [],
   predictions: {},
   backtestResultsAll: null,
@@ -326,34 +326,36 @@ function App() {
 
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6 pt-4 border-t border-white/5">
                   <div className="flex flex-wrap gap-4 items-center">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-white/20 uppercase tracking-widest block">Model Comparison</label>
-                      <div className="flex gap-2">
-                        {Object.keys(models).map(key => (
-                          <button key={key}
-                            onClick={() => {
-                              const cur = s.selectedModels;
-                              updateSession({ selectedModels: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key] });
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                              s.selectedModels.includes(key) ? 'bg-accent border-accent text-white' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'}`}>
-                            {models[key].name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
                     <button onClick={loadSymbolData} disabled={loading || !s.symbol}
                       className="h-11 bg-white/5 hover:bg-white/10 text-white font-bold px-6 rounded-xl border border-white/10 backdrop-blur-md transition-all flex items-center gap-2 shadow-lg shadow-black/20">
                       <Database size={18} /> Load Data
                     </button>
-                    <button onClick={runPredictions} disabled={loading || s.selectedModels.length === 0 || s.data.length === 0}
-                      className="h-11 bg-gradient-to-r from-accent to-purple-500 hover:from-accent/90 hover:to-purple-500/90 text-white font-bold px-8 rounded-xl disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-accent/20 border border-white/10 backdrop-blur-md">
-                      {loading ? <RefreshCw className="animate-spin" size={18} /> : <TrendingUp size={18} />}
-                      Run Prediction
-                    </button>
                   </div>
+                  {s.data.length > 0 && (
+                    <div className="flex gap-4 items-center flex-wrap justify-end">
+                      <div className="space-y-1 text-left md:text-right">
+                        <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest block">Select Models for Prediction</label>
+                        <div className="flex gap-2">
+                          {Object.keys(models).map(key => (
+                            <button key={key}
+                              onClick={() => {
+                                const cur = s.selectedModels;
+                                updateSession({ selectedModels: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key] });
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ${
+                                s.selectedModels.includes(key) ? 'bg-accent border-accent text-white shadow-lg shadow-accent/20' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'}`}>
+                              {models[key].name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <button onClick={runPredictions} disabled={loading || s.selectedModels.length === 0 || s.data.length === 0}
+                        className="h-11 mt-4 md:mt-0 bg-gradient-to-r from-accent to-purple-500 hover:from-accent/90 hover:to-purple-500/90 text-white font-bold px-8 rounded-xl disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-accent/20 border border-white/10 backdrop-blur-md">
+                        {loading ? <RefreshCw className="animate-spin" size={18} /> : <TrendingUp size={18} />}
+                        Run Prediction
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
