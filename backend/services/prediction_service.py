@@ -87,7 +87,8 @@ class PredictionService:
         # Generate future timestamps dynamically by inferring market hours from historical data
         last_date = df["datetime"].max()
         valid_times = sorted(list(set(df["datetime"].dt.time)))
-        valid_days = set(df["datetime"].dt.dayofweek)
+        # Consider only 5 working days per week (Monday-Friday)
+        valid_days = {0, 1, 2, 3, 4}
 
         future_ts = []
         curr_date = last_date.normalize()

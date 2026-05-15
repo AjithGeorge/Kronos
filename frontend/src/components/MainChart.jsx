@@ -3,6 +3,20 @@ import createPlotlyComponent from 'react-plotly.js/factory';
 import Plotly from 'plotly.js-dist-min';
 import { Activity } from 'lucide-react';
 
+const formatXLabel = (isoStr) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split(/[T ]/);
+  const d = parts[0].split('-');
+  if (d.length !== 3) return isoStr;
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(d[1], 10) - 1];
+  const cleanDate = `${parseInt(d[2], 10)} ${m} ${d[0]}`;
+  const t = parts[1] || '';
+  if (!t || t.startsWith('00:00:00')) return cleanDate;
+  const tp = t.split(':');
+  if (tp.length >= 2) return `${cleanDate} ${tp[0]}:${tp[1]}`;
+  return cleanDate;
+};
+
 const Plot = (createPlotlyComponent.default || createPlotlyComponent)(Plotly);
 
 const plotConfig = {
@@ -38,7 +52,7 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
     plot_bgcolor: 'rgba(0,0,0,0)',
     showlegend: true,
     legend: { orientation: 'h', y: -0.1 },
-    xaxis: { rangeslider: { visible: true }, domain: [0, 1], anchor: 'y2' },
+    xaxis: { type: 'category', nticks: 10, showgrid: false, rangeslider: { visible: true }, domain: [0, 1], anchor: 'y2' },
     yaxis: { title: 'Price', domain: [0.35, 1], gridcolor: 'rgba(255,255,255,0.05)', zerolinecolor: 'rgba(255,255,255,0.05)' },
     yaxis2: { title: 'Volume', domain: [0, 0.25], gridcolor: 'rgba(255,255,255,0.05)', zerolinecolor: 'rgba(255,255,255,0.05)' },
     hovermode: 'x unified'
@@ -48,7 +62,7 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
 
   // Historical candlestick
   traces.push({
-    x: histData.map(d => d.datetime), open: histData.map(d => d.open), high: histData.map(d => d.high),
+    x: histData.map(d => formatXLabel(d.datetime)), open: histData.map(d => d.open), high: histData.map(d => d.high),
     low: histData.map(d => d.low), close: histData.map(d => d.close),
     type: 'candlestick', name: 'Historical',
     increasing: { line: { color: '#10b981' } }, decreasing: { line: { color: '#ef4444' } }, yaxis: 'y'
@@ -56,7 +70,7 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
 
   // Historical volume
   traces.push({
-    x: histData.map(d => d.datetime), y: histData.map(d => d.volume),
+    x: histData.map(d => formatXLabel(d.datetime)), y: histData.map(d => d.volume),
     type: 'bar', name: 'Hist Volume', marker: { color: 'rgba(255,255,255,0.1)' }, yaxis: 'y2'
   });
 
@@ -74,7 +88,7 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
 
       // Prediction candlestick
       traces.push({
-        x: predDf.map(d => d.datetime),
+        x: predDf.map(d => formatXLabel(d.datetime)),
         open: predDf.map(d => d.open || d.close), high: predDf.map(d => d.high || d.close),
         low: predDf.map(d => d.low || d.close), close: predDf.map(d => d.close),
         type: 'candlestick', name: `${modelKey} Pred`,
@@ -84,7 +98,7 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
 
       // Prediction volume
       traces.push({
-        x: predDf.map(d => d.datetime), y: predDf.map(d => d.volume),
+        x: predDf.map(d => formatXLabel(d.datetime)), y: predDf.map(d => d.volume),
         type: 'bar', name: `${modelKey} Vol`,
         marker: { color, opacity: 0.4 }, yaxis: 'y2'
       });
@@ -92,8 +106,8 @@ const MainChart = ({ data, predictions, activeModelKey, mode = 'all' }) => {
 
     const firstPredDf = modelsToShow.length > 0 ? modelsToShow[0][1]?.pred_df : null;
     const separatorDate = (firstPredDf && firstPredDf.length > 0) 
-      ? firstPredDf[0].datetime 
-      : histData[histData.length - 1].datetime;
+      ? formatXLabel(firstPredDf[0].datetime) 
+      : formatXLabel(histData[histData.length - 1].datetime);
 
     // Separator line
     layout.shapes = [{

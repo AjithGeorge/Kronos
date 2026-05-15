@@ -3,6 +3,20 @@ import createPlotlyComponent from 'react-plotly.js/factory';
 import Plotly from 'plotly.js-dist-min';
 import { FlaskConical, Target, Activity, BarChart, ChevronDown, ChevronUp, Gauge } from 'lucide-react';
 
+const formatXLabel = (isoStr) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split(/[T ]/);
+  const d = parts[0].split('-');
+  if (d.length !== 3) return isoStr;
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(d[1], 10) - 1];
+  const cleanDate = `${parseInt(d[2], 10)} ${m} ${d[0]}`;
+  const t = parts[1] || '';
+  if (!t || t.startsWith('00:00:00')) return cleanDate;
+  const tp = t.split(':');
+  if (tp.length >= 2) return `${cleanDate} ${tp[0]}:${tp[1]}`;
+  return cleanDate;
+};
+
 const Plot = (createPlotlyComponent.default || createPlotlyComponent)(Plotly);
 
 const Percent = ({ size, className }) => (
@@ -30,6 +44,7 @@ const darkLayout = {
   template: 'plotly_dark', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
   margin: { l: 50, r: 20, t: 40, b: 50 }, hovermode: 'x unified', legend: { orientation: 'h', y: -0.15 },
   yaxis: { gridcolor: 'rgba(255,255,255,0.05)', zerolinecolor: 'rgba(255,255,255,0.05)' },
+  xaxis: { type: 'category', nticks: 10, showgrid: false },
 };
 
 const BacktestSection = ({ backtestResultsAll, models, selectedModels, onRunBacktest, loading, backtestPredLen, setBtPredLen, backtestLookback, setBtLookback }) => {
@@ -157,8 +172,8 @@ const BacktestSection = ({ backtestResultsAll, models, selectedModels, onRunBack
           <div className="glass rounded-2xl p-6 border border-white/5">
             <h3 className="text-sm font-bold uppercase tracking-wider text-white/60 mb-4">Actual vs Predicted — {res.config?.name}</h3>
             <Plot data={[
-              { x: actualDf.map(d=>d.datetime), y: actualDf.map(d=>d.close), type:'scatter', mode:'lines+markers', name:'Actual Close', line:{color:'#3b82f6',width:3}, marker:{size:6} },
-              { x: predDf.map(d=>d.datetime), y: predDf.map(d=>d.close), type:'scatter', mode:'lines+markers', name:'Predicted Close', line:{color:'#ef4444',width:2,dash:'dash'}, marker:{size:5} }
+              { x: actualDf.map(d=>formatXLabel(d.datetime)), y: actualDf.map(d=>d.close), type:'scatter', mode:'lines+markers', name:'Actual Close', line:{color:'#3b82f6',width:3}, marker:{size:6} },
+              { x: predDf.map(d=>formatXLabel(d.datetime)), y: predDf.map(d=>d.close), type:'scatter', mode:'lines+markers', name:'Predicted Close', line:{color:'#ef4444',width:2,dash:'dash'}, marker:{size:5} }
             ]} layout={{...darkLayout, title:'Backtest: Actual vs Predicted Close Price', height:500, yaxis:{...darkLayout.yaxis,title:'Price'}}} config={plotConfig} className="w-full" useResizeHandler />
           </div>
 
@@ -167,8 +182,8 @@ const BacktestSection = ({ backtestResultsAll, models, selectedModels, onRunBack
             <div className="glass rounded-2xl p-6 border border-white/5">
               <h3 className="text-sm font-bold uppercase tracking-wider text-white/60 mb-4">Volume Comparison — {res.config?.name}</h3>
               <Plot data={[
-                { x: actualDf.map(d=>d.datetime), y: actualDf.map(d=>d.volume), type:'bar', name:'Actual Volume', marker:{color:'#3b82f6',opacity:0.7} },
-                { x: predDf.map(d=>d.datetime), y: predDf.map(d=>d.volume), type:'bar', name:'Predicted Volume', marker:{color:'#ef4444',opacity:0.7} }
+                { x: actualDf.map(d=>formatXLabel(d.datetime)), y: actualDf.map(d=>d.volume), type:'bar', name:'Actual Volume', marker:{color:'#3b82f6',opacity:0.7} },
+                { x: predDf.map(d=>formatXLabel(d.datetime)), y: predDf.map(d=>d.volume), type:'bar', name:'Predicted Volume', marker:{color:'#ef4444',opacity:0.7} }
               ]} layout={{...darkLayout, title:`Volume Comparison — ${res.config?.name}`, height:400, barmode:'group', yaxis:{...darkLayout.yaxis,title:'Volume'}}} config={plotConfig} className="w-full" useResizeHandler />
             </div>
           )}
@@ -187,7 +202,7 @@ const BacktestSection = ({ backtestResultsAll, models, selectedModels, onRunBack
                   const ep = err / a.close * 100;
                   const ec = Math.abs(ep)<2 ? 'text-emerald-400' : Math.abs(ep)<5 ? 'text-yellow-400' : 'text-red-400';
                   return (<tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
-                    <td className="px-6 py-3 text-white/60">{new Date(a.datetime).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}</td>
+                    <td className="px-6 py-3 text-white/60">{formatXLabel(a.datetime)}</td>
                     <td className="px-6 py-3 text-white/80 font-mono">{a.close.toFixed(4)}</td>
                     <td className="px-6 py-3 text-white/80 font-mono">{p.close.toFixed(4)}</td>
                     <td className={`px-6 py-3 font-mono ${ec}`}>{err.toFixed(4)}</td>
